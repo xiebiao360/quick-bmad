@@ -19,7 +19,7 @@
 所有API端点 **MUST** 使用以下统一结构：
 
 ```rust
-/// libs/liangx-core/src/api/response.rs
+/// libs/<project>-core/src/api/response.rs
 pub struct ApiResponse<T> {
     /// 业务状态码（仅在HTTP=2xx时有效）
     /// 0: 成功，其他: 业务错误码
@@ -55,7 +55,7 @@ pub struct ApiResponse<T> {
 90000-99999: Analytics服务
 ```
 
-错误码定义集中在 `libs/liangx-core/src/api/error_codes.rs`。
+错误码定义集中在 `libs/<project>-core/src/api/error_codes.rs`。
 
 ---
 
@@ -66,7 +66,7 @@ pub struct ApiResponse<T> {
 Handler文件 **MUST** 包含以下导入：
 
 ```rust
-use liangx_core::{ApiResponse, error_codes};
+use project_core::{ApiResponse, error_codes};
 ```
 
 ### 2. Handler返回类型
@@ -189,7 +189,7 @@ ApiResponse::error(error_codes::INTERNAL_ERROR, "错误消息")
 
 迁移现有服务或实现新端点时，**MUST** 确认：
 
-- [ ] 已导入 `use liangx_core::{ApiResponse, error_codes};`
+- [ ] 已导入 `use project_core::{ApiResponse, error_codes};`
 - [ ] Handler返回类型符合规范
 - [ ] 成功响应使用 `ApiResponse::success(data)`
 - [ ] 业务错误返回 HTTP 200 + `business_error()`
@@ -223,8 +223,8 @@ async function request<T>(url: string): Promise<T> {
 
 ## 参考资料
 
-- 错误码定义：`libs/liangx-core/src/api/error_codes.rs`
-- 响应结构实现：`libs/liangx-core/src/api/response.rs`
+- 错误码定义：`libs/<project>-core/src/api/error_codes.rs`
+- 响应结构实现：`libs/<project>-core/src/api/response.rs`
 - 云服务商API设计：阿里云、腾讯云、AWS API规范
 
 **文档版本**: v1.0

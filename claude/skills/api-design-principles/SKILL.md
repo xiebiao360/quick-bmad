@@ -199,7 +199,7 @@ async fn admin_auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    use liangx_auth::JwtDecoder;
+    use project_auth::JwtDecoder;
 
     // 提取 token
     let token = req

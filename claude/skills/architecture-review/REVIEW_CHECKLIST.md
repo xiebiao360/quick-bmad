@@ -107,7 +107,7 @@
 ### API响应结构（后端）
 
 #### 统一响应格式（参考 API_RESPONSE_DESIGN.md）
-- [ ] 已导入 `use liangx_core::{ApiResponse, error_codes};`
+- [ ] 已导入 `use project_core::{ApiResponse, error_codes};`
 - [ ] Handler返回类型符合规范：`Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<()>>)>`
 - [ ] 成功响应使用 `ApiResponse::success(data)`
 - [ ] 业务错误（余额不足等）返回 HTTP 200 + `business_error()`
