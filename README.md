@@ -1,4 +1,4 @@
-# BMAD Portable Bundle
+# quick-bmad
 
 可迁移的 BMAD 流程包（Claude/Codex 工作流），包含：
 
@@ -11,7 +11,7 @@
 ## 1. 包结构
 
 ```text
-packages/bmad-portable/
+quick-bmad/
 ├── bmad/
 │   ├── workflows/
 │   │   ├── workflow.yml
@@ -34,9 +34,6 @@ packages/bmad-portable/
 ├── docs/development/
 │   ├── ai-dev-launch-guide.md
 │   └── ai-dev-coding-guardrails.md
-├── examples/liangx/
-│   ├── docs/development/...
-│   └── bmad/project/...
 └── scripts/
     ├── install.sh
     └── verify.sh
@@ -47,14 +44,14 @@ packages/bmad-portable/
 ### 2.1 一键安装
 
 ```bash
-cd <this-repo>/packages/bmad-portable
+cd quick-bmad
 ./scripts/install.sh --target <your-project-root>
 ```
 
 ### 2.2 安装后校验
 
 ```bash
-cd <this-repo>/packages/bmad-portable
+cd quick-bmad
 ./scripts/verify.sh <your-project-root>
 ```
 
@@ -124,13 +121,3 @@ cd <this-repo>/packages/bmad-portable
 
 3. 报错 `Skill ... cannot be used with Skill tool due to disable-model-invocation`
 - 检查目标 skill 的 frontmatter `disable-model-invocation`
-
-## 8. LiangX 示例
-
-如果你要复用 LiangX 的现成配置/文档，可参考：
-
-- `examples/liangx/docs/development/ai-dev-launch-guide.md`
-- `examples/liangx/docs/development/ai-dev-coding-guardrails.md`
-- `examples/liangx/bmad/project/validation-profile.yml`
-- `examples/liangx/bmad/project/coding-profile.yml`
-
