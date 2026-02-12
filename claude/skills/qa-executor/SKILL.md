@@ -52,6 +52,18 @@ disable-model-invocation: false
 
 qa-executor 作为“条件触发”能力接入 BMAD，不改变 coordinator 的默认策略。
 
+判定优先级（高 → 低）：
+
+1) 用户显式调用 `/qa-executor` 或明确要求“执行实际验证”
+- 视为 execute 意图，优先进入真实验证路径。
+
+2) verification_policy / verification_decision
+- strict 或 ask-execute：执行真实验证。
+- ask-skip：不执行真实验证，产出 NOT EXECUTED 报告。
+
+3) default
+- 仅在“无显式执行意图”时，才允许不执行。
+
 触发建议：
 
 A) verification_policy = strict
@@ -66,6 +78,10 @@ C) verification_policy = default
 
 D) verification_policy = ask 且 verification_decision = skip
 - 不执行真实验证；按 NOT EXECUTED 规则产出报告。
+
+禁止规则：
+- 不得因为 “workflow-state 缺失/为空” 或 “verification_policy 未设置” 而自动降级为 static-review。
+- 当执行意图不明确时，必须先询问用户 execute / skip，再继续。
 
 ================================================
 
@@ -142,6 +158,10 @@ bugfix-test-report.md 至少包含：
 Phase 0 — Preconditions
 - 检查 workflow-state.json、guide_path、mode、verification_policy。
 - 判定“执行真实验证”还是“仅产出 NOT EXECUTED 报告”。
+- 若 workflow-state 缺失或为空：
+  - 不得直接走 static-review；
+  - 若用户已显式要求执行验证（例如直接调用 `/qa-executor`），继续按真实验证路径执行，并在报告中记录 state 缺失风险；
+  - 若用户未显式要求执行，先询问 execute / skip。
 
 Phase 1 — Build Run Scope
 - 从 qa-test-plan / regression-matrix 提取本轮目标。
@@ -235,7 +255,7 @@ Phase 7 — Decision Prompt（缺陷后续决策）
 以下任一情况必须阻断并在报告中明确：
 
 - validation.guide_path 缺失或不可读
-- workflow-state.json 缺失，无法判定本轮 mode/policy
+- workflow-state.json 缺失且用户也未给出 execute/skip 决策
 - 关键依赖未满足且无法通过指南中的故障排除恢复
 - 证据不足以支撑 PASS/FAIL
 
@@ -254,5 +274,6 @@ Phase 7 — Decision Prompt（缺陷后续决策）
 当用户或 Coordinator 调用 `/qa-executor`：
 
 - 先读取 workflow + validation 配置 + workflow-state。
-- 判断本次应执行真实验证还是产出 NOT EXECUTED 报告。
+- 直接调用 `/qa-executor` 视为优先执行意图；除非用户明确 skip，否则应尝试真实验证。
+- 若缺少 verification_policy/decision，先询问 execute / skip，或按用户显式意图继续执行。
 - 产出 coordinator 可直接使用的测试报告与证据文档。
