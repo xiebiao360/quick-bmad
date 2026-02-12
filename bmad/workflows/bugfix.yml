@@ -1,0 +1,113 @@
+workflow:
+  name: universal-bugfix
+  mode: bugfix
+  orchestrator: coordinator
+
+artifacts_dir: ".bmad/artifacts"
+
+validation:
+  guide_path: "docs/development/ai-dev-launch-guide.md"
+  profile_path: ".bmad/project/validation-profile.yml"
+
+governance:
+  coding_guide_path: "docs/development/ai-dev-coding-guardrails.md"
+  coding_profile_path: ".bmad/project/coding-profile.yml"
+
+# artifacts key -> artifacts_dir 下的文件名
+artifacts:
+  bug_brief: "bugfix-bug-brief.md"
+  repro: "bugfix-repro-steps.md"
+  task_plan: "bugfix-task-plan.md"
+  fix_summary: "bugfix-fix-summary.md"
+  test_report: "bugfix-test-report.md"
+  regression_matrix: "qa-regression-matrix.md"
+  qa_test_plan: "qa-test-plan.md"
+
+# templates（可选但推荐：让 coordinator 明确知道用哪个模板）
+templates:
+  bug_brief: ".bmad/templates/bugfix-bug-brief.template.md"
+  repro: ".bmad/templates/bugfix-repro-steps.template.md"
+  task_plan: ".bmad/templates/bugfix-task-plan.template.md"
+  fix_summary: ".bmad/templates/bugfix-fix-summary.template.md"
+  test_report: ".bmad/templates/bugfix-test-report.template.md"
+
+global_rules:
+  - "Bugfix mode: skip PRD/ADR gates"
+  - "Default: no refactor unless justified in Explore + rollback included"
+  - "Minimal scope change only"
+  - "Must follow Task Protocol: Analysis→Explore→Implement→Quality Review"
+  - "Coordinator auto-generates TASK-IDs"
+  - "All artifacts must be written to artifacts_dir"
+
+stages:
+  - id: triage
+    owner: coordinator
+    outputs_required: [bug_brief]
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "Severity decided (P0/P1/P2)"
+        - "Impacted components identified (admin-web/pos-app/backend)"
+        - "Scope boundary stated (allowed/forbidden)"
+
+  - id: reproduce
+    owner: qa
+    inputs: [bug_brief]
+    outputs_required: [repro]
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "Repro steps are clear OR marked cannot-repro with evidence"
+        - "Expected vs Actual described"
+        - "Regression risk areas listed"
+
+  - id: task_plan
+    owner: coordinator
+    inputs: [bug_brief, repro]
+    outputs_required: [task_plan]
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "Task Protocol complete: Analysis/Explore/Implement/Quality Review"
+        - "Allowed/Forbidden scope present"
+        - "Rollback plan present"
+        - "At least 5 regression points + 5 test cases"
+        - "TASK-ID assigned and recorded in task_plan"
+
+  - id: fix
+    mode: parallel
+    owners: [backend, frontend, android]
+    inputs: [task_plan]
+    outputs_required: [fix_summary]
+    rules:
+      - "No scope expansion; if needed, return to task_plan stage"
+      - "No API changes unless explicitly planned and documented"
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "Fix summary includes changed files/modules and why"
+        - "Forbidden scope remained untouched (explicitly stated)"
+
+  - id: validate
+    owner: qa
+    inputs: [fix_summary, task_plan]
+    outputs_required: [test_report]
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "Test report covers required test cases"
+        - "Regression points validated or explicitly deferred with reason"
+        - "Test report declares Verification Method (manual-run/automated-run/static-review) and Overall Status (PASS/FAIL/NOT EXECUTED)"
+        - "If Overall Status is PASS/FAIL, report includes executable steps/commands + evidence (logs/output/screenshots) and environment"
+        - "If Verification Method is static-review, report must mark NOT EXECUTED and include reason"
+        - "Verification Policy compliance: strict => no NOT EXECUTED; default => no PASS/FAIL"
+
+  - id: update_regression_matrix
+    owner: qa
+    inputs: [task_plan, test_report]
+    outputs_required: [regression_matrix, qa_test_plan]
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "Regression matrix updated with new cases"
+        - "Smoke set updated if needed"

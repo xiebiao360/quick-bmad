@@ -1,0 +1,16 @@
+# Project-level validation profile (template)
+
+project:
+  name: "<project_name>"
+  environment: "local"
+
+entry:
+  guide_path: "docs/development/ai-dev-launch-guide.md"
+
+# Fill in health URLs and client base URLs for your project.
+services: {}
+clients: {}
+
+qa:
+  default_verification_method: "static-review"
+  evidence_dir: "/tmp"

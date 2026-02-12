@@ -1,0 +1,7 @@
+# Project-level coding governance profile (template)
+
+project:
+  name: "<project_name>"
+
+entry:
+  coding_guide_path: "docs/development/ai-dev-coding-guardrails.md"

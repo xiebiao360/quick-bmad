@@ -1,0 +1,73 @@
+workflow:
+  name: universal-bmad-claude
+  mode: exploration
+
+artifacts_dir: ".bmad/artifacts"
+
+validation:
+  guide_path: "docs/development/ai-dev-launch-guide.md"
+  profile_path: ".bmad/project/validation-profile.yml"
+
+governance:
+  coding_guide_path: "docs/development/ai-dev-coding-guardrails.md"
+  coding_profile_path: ".bmad/project/coding-profile.yml"
+
+artifacts:
+  # ===== Discovery =====
+  prd: "discovery-prd.md"
+  scope: "discovery-scope-definition.md"
+
+  # ===== Architecture =====
+  adr: "architecture_design-adr.md"
+  impact: "architecture_design-impact-analysis.md"
+
+  # ===== Tasks / QA =====
+  qa_matrix: "qa-regression-matrix.md"
+  qa_test_plan: "qa-test-plan.md"
+  qa_test_report: "qa-test-report.md"
+
+templates:
+  qa_test_report: ".bmad/templates/qa-test-report.template.md"
+
+stages:
+  - id: discovery
+    owner: product_manager
+    exit_gate:
+      criteria:
+        - "PRD complete"
+        - "Scope complete"
+
+  - id: architecture_design
+    owner: architect
+    exit_gate:
+      criteria:
+        - "ADR quality"
+        - "Aligned with PRD"
+
+  - id: api_design
+    owner: backend
+
+  - id: scope_freeze
+    owner: coordinator
+
+  - id: parallel_dev
+    owners: [backend, frontend, android]
+    rules:
+      - "Coordinator auto-generates TASK-IDs"
+      - "Each task requires task-TASK-XXX-plan.md before coding"
+
+  - id: architecture_review
+    owner: architect
+
+  - id: qa_validation
+    owner: qa
+    inputs: [frozen_spec]
+    outputs_required: [qa_matrix, qa_test_plan, qa_test_report]
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "qa-regression-matrix.md exists and includes smoke set + full regression set"
+        - "qa-test-plan.md exists and maps to tasks"
+
+  - id: release_candidate
+    owner: coordinator

@@ -1,0 +1,8 @@
+# Installer output in target repos (not used here, but safe defaults)
+.bmad/artifacts/
+.bmad/archive/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
