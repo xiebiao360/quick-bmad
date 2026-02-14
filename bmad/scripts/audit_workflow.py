@@ -20,7 +20,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
-
 DEFAULT_MILESTONE_KEYS = ["prd", "scope", "adr", "impact", "ui_ux_spec", "api_design"]
 
 
@@ -145,7 +144,10 @@ def check_workflow_definition(path: Path) -> Tuple[List[Finding], Dict[str, Any]
             )
         )
 
-    if not isinstance(milestone_lock_filename, str) or not milestone_lock_filename.strip():
+    if (
+        not isinstance(milestone_lock_filename, str)
+        or not milestone_lock_filename.strip()
+    ):
         findings.append(
             Finding(
                 "ERROR",
@@ -314,11 +316,26 @@ def required_tokens_for_artifact(artifact_key: str, filename: str) -> List[str]:
     if artifact_key.endswith("_gate_report") or filename.endswith("-gate-report.md"):
         tokens.extend(["Gate Status", "Blockers"])
     if artifact_key == "qa_test_plan":
-        tokens.extend(["Summary", "Smoke Set", "Regression", "Coverage by Task"])
+        tokens.extend(
+            ["Summary", "Smoke Set", "Regression", "Coverage by Task", "Milestone ID"]
+        )
     if artifact_key == "qa_test_report":
-        tokens.extend(["Verification Method", "Overall Status"])
+        tokens.extend(["Verification Method", "Overall Status", "Milestone ID"])
     if artifact_key == "architecture_review_gate_report":
-        tokens.extend(["Review Scope", "Gate Status"])
+        tokens.extend(
+            [
+                "Review Scope",
+                "Gate Status",
+                "Milestone ID",
+                "Reviewed Artifacts",
+                "Evidence Index",
+                "Decision Rationale",
+            ]
+        )
+    if artifact_key == "parallel_dev_gate_report":
+        tokens.extend(["Task Coverage", "Gate Status"])
+    if artifact_key == "release_candidate_gate_report":
+        tokens.extend(["Milestone ID", "Final Decision", "Gate Status"])
     if artifact_key == "milestone_lock_report":
         tokens.extend(["Milestone ID", "Locked Keys", "Lock File"])
     return tokens
@@ -388,7 +405,9 @@ def check_milestone_consistency(
     require_milestone = False
     scope_freeze_idx = stage_index.get("scope_freeze")
     enforce_stage = milestone.get("enforce_from_stage")
-    enforce_idx = stage_index.get(enforce_stage) if isinstance(enforce_stage, str) else None
+    enforce_idx = (
+        stage_index.get(enforce_stage) if isinstance(enforce_stage, str) else None
+    )
 
     if scope_freeze_idx is not None and len(completed) > scope_freeze_idx:
         require_milestone = True
@@ -414,7 +433,10 @@ def check_milestone_consistency(
         )
         return findings
 
-    if not isinstance(milestone_lock_path_value, str) or not milestone_lock_path_value.strip():
+    if (
+        not isinstance(milestone_lock_path_value, str)
+        or not milestone_lock_path_value.strip()
+    ):
         findings.append(
             Finding(
                 "ERROR",

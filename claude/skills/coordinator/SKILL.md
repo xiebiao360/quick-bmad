@@ -656,8 +656,28 @@ Breaking 判断
    - 通过 artifacts 映射 + artifacts_dir 拼路径
    - 不存在或为空 → Missing
 
-3) Gate 结论：
-   - 若 Missing 非空 → Gate Status: NO，阻断推进
+3) 最小内容完整性检查（Content Integrity）：
+   - 对关键产物执行关键字段校验（至少包括）：
+     - 各类 gate report：`Gate Status` + `Blockers`
+     - architecture_review_gate_report：`Milestone ID` + `Reviewed Artifacts` + `Evidence Index` + `Decision Rationale`
+     - qa-test-plan：`Coverage by Task` + `Milestone ID`
+     - qa-test-report：`Verification Method` + `Overall Status` + `Milestone ID`
+   - 若关键字段缺失：
+     → Gate Status: NO
+     → Blocker: artifact content incomplete (cannot prove real review)
+
+4) 证据与一致性检查（Evidence + Consistency）：
+   - 对需要执行证据的阶段（architecture_review / qa_validation / release_candidate）：
+     - 必须提供可追溯 evidence 索引（命令/日志/截图/链接）
+   - milestone 已启用时：
+     - 从 `scope_freeze` 开始，必须存在 `milestone_id` 与 lock 路径
+     - `python3 .bmad/scripts/milestone_lock.py verify` 必须通过
+   - 若任一不满足：
+     → Gate Status: NO
+     → Blocker: evidence missing or milestone drift
+
+5) Gate 结论：
+   - 若 Missing 非空或完整性/一致性检查失败 → Gate Status: NO，阻断推进
    - 否则 → Gate Status: YES
  
 ------------------------------------------------

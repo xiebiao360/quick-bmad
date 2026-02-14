@@ -143,7 +143,9 @@ def load_lock(lock_path: Path) -> Dict[str, Any]:
     return data
 
 
-def resolve_lock_path(milestone_dir: Path, milestone_id: str, lock_filename: str) -> Path:
+def resolve_lock_path(
+    milestone_dir: Path, milestone_id: str, lock_filename: str
+) -> Path:
     return milestone_dir / milestone_id / lock_filename
 
 
@@ -423,7 +425,7 @@ def resolve_target_lock(
     repo_root: Path,
     workflow_path: str,
     milestone_id: str | None,
-) -> Tuple[Path, Dict[str, Any], Dict[str, str], Path, str, str]:
+) -> Tuple[Path, Dict[str, Any], Dict[str, str], Path, str, str, List[str]]:
     workflow = load_yaml(repo_root / workflow_path)
     (
         enabled,
@@ -432,7 +434,7 @@ def resolve_target_lock(
         lock_filename,
         pointer_path,
         artifacts,
-        _,
+        keys,
     ) = resolve_config(workflow, repo_root)
 
     if not enabled:
@@ -447,14 +449,22 @@ def resolve_target_lock(
         raise ValueError(f"lock file not found: {lock_path}")
 
     lock = load_lock(lock_path)
-    return lock_path, lock, artifacts, artifacts_dir, resolved_id, lock_filename
+    return lock_path, lock, artifacts, artifacts_dir, resolved_id, lock_filename, keys
 
 
 def cmd_use(args: argparse.Namespace) -> int:
     repo_root = Path.cwd()
 
     try:
-        lock_path, lock, artifacts, artifacts_dir, milestone_id, _ = resolve_target_lock(
+        (
+            lock_path,
+            lock,
+            artifacts,
+            artifacts_dir,
+            milestone_id,
+            _,
+            _keys,
+        ) = resolve_target_lock(
             repo_root=repo_root,
             workflow_path=args.workflow,
             milestone_id=args.milestone_id,
@@ -498,7 +508,8 @@ def cmd_use(args: argparse.Namespace) -> int:
         shutil.copy2(src, dst)
         copied.append(relpath(dst, repo_root))
 
-    update_state_milestone(repo_root, milestone_id, lock_path)
+    if not failed:
+        update_state_milestone(repo_root, milestone_id, lock_path)
 
     report_path = repo_root / args.report
     rows = [
@@ -526,7 +537,15 @@ def cmd_verify(args: argparse.Namespace) -> int:
     repo_root = Path.cwd()
 
     try:
-        lock_path, lock, artifacts, artifacts_dir, milestone_id, _ = resolve_target_lock(
+        (
+            lock_path,
+            lock,
+            artifacts,
+            artifacts_dir,
+            milestone_id,
+            _,
+            keys,
+        ) = resolve_target_lock(
             repo_root=repo_root,
             workflow_path=args.workflow,
             milestone_id=args.milestone_id,
@@ -536,21 +555,44 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return 1
 
     files = lock.get("files", {})
+    if not isinstance(files, dict):
+        print(f"invalid lock format, missing files mapping: {lock_path}")
+        return 1
+
     ok: List[str] = []
     drift: List[str] = []
     missing: List[str] = []
+    extra: List[str] = []
 
-    for key, entry in files.items():
-        if not isinstance(entry, dict):
-            missing.append(f"{key}:invalid lock entry")
-            continue
-
+    for key in keys:
         filename = artifacts.get(key)
         if not filename:
             missing.append(f"{key}:not mapped in workflow.artifacts")
             continue
 
+        entry = files.get(key)
+        if not isinstance(entry, dict):
+            missing.append(f"{key}:missing lock entry")
+            continue
+
+        locked_path_value = entry.get("locked_path")
         expected_hash = str(entry.get("sha256", ""))
+        if not isinstance(locked_path_value, str) or not locked_path_value.strip():
+            missing.append(f"{key}:invalid locked_path in lock")
+            continue
+
+        locked_path = resolve_lock_path(repo_root, locked_path_value)
+        if not locked_path.exists() or locked_path.stat().st_size == 0:
+            missing.append(f"{key}:locked file missing {locked_path}")
+            continue
+
+        locked_hash = sha256_file(locked_path)
+        if locked_hash != expected_hash:
+            drift.append(
+                f"{key}:locked file hash mismatch {relpath(locked_path, repo_root)}"
+            )
+            continue
+
         artifact_path = artifacts_dir / filename
         if not artifact_path.exists() or artifact_path.stat().st_size == 0:
             missing.append(f"{key}:{artifact_path}")
@@ -562,6 +604,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
         else:
             drift.append(f"{key}:{relpath(artifact_path, repo_root)}")
 
+    for key in files.keys():
+        if key not in keys:
+            extra.append(str(key))
+
     report_path = repo_root / args.report
     rows = [
         "## Summary",
@@ -570,14 +616,18 @@ def cmd_verify(args: argparse.Namespace) -> int:
         f"- OK: {len(ok)}",
         f"- Drift: {len(drift)}",
         f"- Missing: {len(missing)}",
+        f"- Extra lock keys: {len(extra)}",
         "",
         "## OK",
     ] + [f"- {item}" for item in ok]
     rows += ["", "## Drift"] + [f"- {item}" for item in drift]
     rows += ["", "## Missing"] + [f"- {item}" for item in missing]
+    rows += ["", "## Extra Lock Keys"] + [f"- {item}" for item in extra]
     write_report(report_path, "Milestone Verify Report", rows)
 
-    print(f"milestone={milestone_id} ok={len(ok)} drift={len(drift)} missing={len(missing)}")
+    print(
+        f"milestone={milestone_id} ok={len(ok)} drift={len(drift)} missing={len(missing)} extra={len(extra)}"
+    )
     print(f"report={report_path}")
     return 1 if drift or missing else 0
 
@@ -623,7 +673,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_create = sub.add_parser("create", help="create lock from artifacts")
     p_create.add_argument("--milestone-id", required=True, help="milestone id")
-    p_create.add_argument("--force", action="store_true", help="overwrite existing lock")
+    p_create.add_argument(
+        "--force", action="store_true", help="overwrite existing lock"
+    )
     p_create.add_argument(
         "--allow-partial",
         action="store_true",
@@ -642,10 +694,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_create.set_defaults(func=cmd_create)
 
-    p_import = sub.add_parser("import-archive", help="create lock from archive directory")
+    p_import = sub.add_parser(
+        "import-archive", help="create lock from archive directory"
+    )
     p_import.add_argument("--milestone-id", required=True, help="milestone id")
     p_import.add_argument("--archive-dir", help="archive path relative to repo root")
-    p_import.add_argument("--force", action="store_true", help="overwrite existing lock")
+    p_import.add_argument(
+        "--force", action="store_true", help="overwrite existing lock"
+    )
     p_import.add_argument(
         "--allow-partial",
         action="store_true",
@@ -666,7 +722,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_use = sub.add_parser("use", help="seed artifacts from lock")
     p_use.add_argument("--milestone-id", help="milestone id (default: ACTIVE pointer)")
-    p_use.add_argument("--force", action="store_true", help="overwrite existing artifacts")
+    p_use.add_argument(
+        "--force", action="store_true", help="overwrite existing artifacts"
+    )
     p_use.add_argument(
         "--report",
         default=".bmad/artifacts/milestone-seed-report.md",
@@ -675,7 +733,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_use.set_defaults(func=cmd_use)
 
     p_verify = sub.add_parser("verify", help="verify artifacts match lock")
-    p_verify.add_argument("--milestone-id", help="milestone id (default: ACTIVE pointer)")
+    p_verify.add_argument(
+        "--milestone-id", help="milestone id (default: ACTIVE pointer)"
+    )
     p_verify.add_argument(
         "--report",
         default=".bmad/artifacts/milestone-verify-report.md",
