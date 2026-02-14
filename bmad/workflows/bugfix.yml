@@ -5,11 +5,13 @@ workflow:
 
 artifacts_dir: ".bmad/artifacts"
 
-baseline:
-  dir: ".bmad/baseline/spec"
+milestone:
+  enabled: false
+  dir: ".bmad/milestones"
+  active_pointer: ".bmad/milestones/ACTIVE"
+  lock_filename: "milestone-lock.yml"
   keys: []
-  auto_seed_on_start: false
-  overwrite_on_snapshot: true
+  enforce_from_stage: ""
 
 validation:
   guide_path: "docs/development/ai-dev-launch-guide.md"

@@ -17,8 +17,6 @@ cd <your-project-root>
 git rev-parse --show-toplevel
 ```
 
-预期：输出项目根目录绝对路径。
-
 ## 2. 复制 quick-bmad 核心文件
 
 在 `quick-bmad` 仓库根目录执行：
@@ -26,19 +24,20 @@ git rev-parse --show-toplevel
 ```bash
 cd <quick-bmad-root>
 
-# 1) 复制 bmad 引擎文件
 mkdir -p <your-project-root>/.bmad
 cp -R bmad/workflows <your-project-root>/.bmad/
 cp -R bmad/templates <your-project-root>/.bmad/
+cp -R bmad/scripts <your-project-root>/.bmad/
+mkdir -p <your-project-root>/.bmad/milestones
+cp bmad/milestones/README.md <your-project-root>/.bmad/milestones/README.md
+
 mkdir -p <your-project-root>/.bmad/project
 cp bmad/project/validation-profile.template.yml <your-project-root>/.bmad/project/validation-profile.yml
 cp bmad/project/coding-profile.template.yml <your-project-root>/.bmad/project/coding-profile.yml
 
-# 2) 复制 skills
 mkdir -p <your-project-root>/.claude/skills
 cp -R claude/skills/* <your-project-root>/.claude/skills/
 
-# 3) 复制项目绑定文档模板
 mkdir -p <your-project-root>/docs/development
 cp docs/development/ai-dev-launch-guide.md <your-project-root>/docs/development/ai-dev-launch-guide.md
 cp docs/development/ai-dev-coding-guardrails.md <your-project-root>/docs/development/ai-dev-coding-guardrails.md
@@ -49,21 +48,10 @@ cp docs/development/ai-dev-coding-guardrails.md <your-project-root>/docs/develop
 ```bash
 cd <your-project-root>
 ls .bmad/workflows
-ls .bmad/templates
-ls .bmad/project
+ls .bmad/scripts
+ls .bmad/milestones
 ls .claude/skills
-ls docs/development
 ```
-
-预期至少包含：
-- `.bmad/workflows/workflow.yml`
-- `.bmad/workflows/bugfix.yml`
-- `.bmad/project/validation-profile.yml`
-- `.bmad/project/coding-profile.yml`
-- `.claude/skills/coordinator/SKILL.md`
-- `.claude/skills/qa-executor/SKILL.md`
-- `docs/development/ai-dev-launch-guide.md`
-- `docs/development/ai-dev-coding-guardrails.md`
 
 ## 3. 填写项目绑定配置（必须）
 
@@ -84,14 +72,6 @@ ls docs/development
 
 至少确认：
 - `entry.coding_guide_path`
-
-可验证检查：
-
-```bash
-cd <your-project-root>
-grep -n "guide_path" .bmad/project/validation-profile.yml
-grep -n "coding_guide_path" .bmad/project/coding-profile.yml
-```
 
 ## 4. 定制项目绑定文档（必须）
 
@@ -116,13 +96,6 @@ grep -n "coding_guide_path" .bmad/project/coding-profile.yml
 - API 网关路由规范
 - 项目结构与 DDD 分层约束
 
-可验证检查：
-
-```bash
-cd <your-project-root>
-grep -n "gateway\|migrations\|DDD\|RUN_MODE" docs/development/ai-dev-coding-guardrails.md
-```
-
 ## 5. 校验 workflow 绑定关系
 
 检查以下路径是否指向真实文件：
@@ -132,16 +105,10 @@ grep -n "gateway\|migrations\|DDD\|RUN_MODE" docs/development/ai-dev-coding-guar
   - `validation.profile_path`
   - `governance.coding_guide_path`
   - `governance.coding_profile_path`
+  - `milestone.*`
 
 - `.bmad/workflows/bugfix.yml`
-  - 同上四项
-
-可验证检查：
-
-```bash
-cd <your-project-root>
-grep -n "guide_path\|profile_path\|coding_guide_path\|coding_profile_path" .bmad/workflows/workflow.yml .bmad/workflows/bugfix.yml
-```
+  - 同上四项（bugfix 下可关闭 milestone）
 
 ## 6. 完整性校验
 
@@ -157,23 +124,30 @@ cd <quick-bmad-root>
 
 ## 7. 使用流程
 
-### 7.1 主流程
+### 7.1 新一期（全新规格）
 
 ```text
-/coordinator verification_policy=default
+/coordinator verification_policy=default milestone_use=skip
 ```
 
-### 7.2 Bugfix 流程
+完成 scope freeze 后立刻创建 milestone：
 
 ```text
-/coordinator .bmad/workflows/bugfix.yml verification_policy=ask
+/milestone-lock action=create workflow=.bmad/workflows/workflow.yml milestone_id=<milestone-id>
 ```
 
-### 7.3 验证策略选择
+### 7.2 按既有 milestone 继续迭代
 
-- `default`：默认允许 `NOT EXECUTED`
-- `ask`：在验证前询问 `execute/skip`
-- `strict`：必须有执行证据
+```text
+/coordinator verification_policy=default milestone_use=require milestone_id=<milestone-id>
+```
+
+### 7.3 从历史归档启动新一期
+
+```text
+/milestone-lock action=import-archive workflow=.bmad/workflows/workflow.yml milestone_id=<new-milestone-id> archive_dir=.bmad/archive/<dir>
+/coordinator milestone_use=require milestone_id=<new-milestone-id>
+```
 
 ## 8. 验收标准（建议）
 
@@ -181,65 +155,16 @@ cd <quick-bmad-root>
 
 - `verify.sh` 通过。
 - coordinator 启动时不再报 guide/profile 缺失。
-- 至少完成一次 bugfix 到 validate 的完整演练。
-- 在 `ask=execute` 或 `strict` 下，能产出执行证据报告（如 `bugfix-test-report.md` + `qa-execution-evidence.md`）。
+- 至少完成一次 scope_freeze 并产出 `milestone-lock-report.md`。
+- 在 parallel_dev / architecture_review / qa_validation 阶段都能通过 milestone verify（无 drift）。
 
-## 9. Baseline 继承（slash 命令）
-
-### 9.1 为什么需要
-
-归档后 `.bmad/artifacts/` 会清空。为避免新一轮 workflow 找不到 PRD/UIUX/ADR，建议启用 baseline：
-
-- 长期基线：`.bmad/baseline/spec/`
-- 启动时回填：seed
-- 归档前固化：snapshot
-
-### 9.2 安装补充（脚本与基线路径）
-
-若手工安装，请确认已复制：
-
-- `bmad/scripts/spec_baseline.py` -> `.bmad/scripts/spec_baseline.py`
-- `bmad/scripts/audit_workflow.py` -> `.bmad/scripts/audit_workflow.py`
-- `bmad/baseline/spec/README.md` -> `.bmad/baseline/spec/README.md`
-- `claude/skills/baseline-spec/SKILL.md` -> `.claude/skills/baseline-spec/SKILL.md`
-
-### 9.3 推荐使用方式（只用斜杠命令）
-
-主流程：
+## 9. Milestone Slash 命令总览
 
 ```text
-/coordinator verification_policy=default baseline=auto
-```
-
-强制回填基线：
-
-```text
-/coordinator baseline=seed
-```
-
-跳过回填：
-
-```text
-/coordinator baseline=skip
-```
-
-先从归档导入再启动：
-
-```text
-/coordinator baseline_import_archive=latest baseline=seed
-```
-
-指定归档目录导入：
-
-```text
-/coordinator baseline_import_archive=.bmad/archive/<dir> baseline=seed
-```
-
-仅管理 baseline（不推进 stage）：
-
-```text
-/baseline-spec action=status workflow=.bmad/workflows/workflow.yml strict=true
-/baseline-spec action=import-archive workflow=.bmad/workflows/workflow.yml archive_dir=.bmad/archive/<dir>
-/baseline-spec action=seed workflow=.bmad/workflows/workflow.yml force=true
-/baseline-spec action=snapshot workflow=.bmad/workflows/workflow.yml
+/milestone-lock action=status workflow=.bmad/workflows/workflow.yml strict=true
+/milestone-lock action=create workflow=.bmad/workflows/workflow.yml milestone_id=<id>
+/milestone-lock action=use workflow=.bmad/workflows/workflow.yml milestone_id=<id>
+/milestone-lock action=verify workflow=.bmad/workflows/workflow.yml milestone_id=<id>
+/milestone-lock action=import-archive workflow=.bmad/workflows/workflow.yml milestone_id=<id> archive_dir=.bmad/archive/<dir>
+/milestone-lock action=set-active workflow=.bmad/workflows/workflow.yml milestone_id=<id>
 ```

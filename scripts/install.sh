@@ -9,7 +9,7 @@ Usage:
   ./scripts/install.sh [--target <repo-root>] [--mode copy]
 
 Installs:
-  - .bmad/ (workflows, templates, scripts, baseline)
+  - .bmad/ (workflows, templates, scripts, milestones)
   - .bmad/project templates (validation-profile, coding-profile)
   - .claude/skills (BMAD skills)
   - docs/development templates (validation guide, coding guardrails)
@@ -58,7 +58,7 @@ mkdir -p \
   "$TARGET/.bmad/workflows" \
   "$TARGET/.bmad/templates" \
   "$TARGET/.bmad/scripts" \
-  "$TARGET/.bmad/baseline/spec" \
+  "$TARGET/.bmad/milestones" \
   "$TARGET/.bmad/project" \
   "$TARGET/.claude/skills" \
   "$TARGET/docs/development"
@@ -85,13 +85,8 @@ for f in "$SRC_DIR/bmad/scripts"/*; do
   fi
 done
 
-if [[ -d "$SRC_DIR/bmad/baseline/spec" ]]; then
-  for f in "$SRC_DIR/bmad/baseline/spec"/*; do
-    base="$(basename "$f")"
-    if [[ ! -e "$TARGET/.bmad/baseline/spec/$base" ]]; then
-      cp "$f" "$TARGET/.bmad/baseline/spec/$base"
-    fi
-  done
+if [[ -f "$SRC_DIR/bmad/milestones/README.md" && ! -e "$TARGET/.bmad/milestones/README.md" ]]; then
+  cp "$SRC_DIR/bmad/milestones/README.md" "$TARGET/.bmad/milestones/README.md"
 fi
 
 # Project templates
@@ -118,7 +113,7 @@ for d in "$SRC_DIR/claude/skills"/*; do
   fi
 done
 
-chmod +x "$TARGET/.bmad/scripts/spec_baseline.py" 2>/dev/null || true
+chmod +x "$TARGET/.bmad/scripts/milestone_lock.py" 2>/dev/null || true
 chmod +x "$TARGET/.bmad/scripts/audit_workflow.py" 2>/dev/null || true
 
 cat <<EOF2
@@ -131,7 +126,7 @@ Next:
      - $TARGET/docs/development/ai-dev-launch-guide.md
      - $TARGET/docs/development/ai-dev-coding-guardrails.md
   4) Run coordinator:
-     - /coordinator verification_policy=default|ask|strict baseline=auto|seed|skip
-  5) Optional baseline ops (slash):
-     - /baseline-spec action=status workflow=.bmad/workflows/workflow.yml strict=true
+     - /coordinator verification_policy=default|ask|strict milestone_use=auto|require|skip
+  5) Optional milestone ops (slash):
+     - /milestone-lock action=status workflow=.bmad/workflows/workflow.yml strict=true
 EOF2

@@ -4,11 +4,13 @@ workflow:
 
 artifacts_dir: ".bmad/artifacts"
 
-baseline:
-  dir: ".bmad/baseline/spec"
+milestone:
+  enabled: true
+  dir: ".bmad/milestones"
+  active_pointer: ".bmad/milestones/ACTIVE"
+  lock_filename: "milestone-lock.yml"
   keys: [prd, scope, adr, impact, ui_ux_spec, api_design]
-  auto_seed_on_start: true
-  overwrite_on_snapshot: true
+  enforce_from_stage: "parallel_dev"
 
 validation:
   guide_path: "docs/development/ai-dev-launch-guide.md"
@@ -38,6 +40,7 @@ artifacts:
 
   # ===== Task Execution =====
   scope_freeze_gate_report: "scope-freeze-gate-report.md"
+  milestone_lock_report: "milestone-lock-report.md"
   parallel_dev_complete_report: "parallel-dev-complete.md"
   parallel_dev_gate_report: "parallel-dev-gate-report.md"
 
@@ -46,7 +49,6 @@ artifacts:
   qa_test_plan: "qa-test-plan.md"
   qa_test_report: "qa-test-report.md"
   qa_release_signoff: "qa-release-signoff.md"
-  baseline_snapshot_report: "baseline-spec-snapshot-report.md"
   release_candidate_gate_report: "release-candidate-gate-report.md"
 
 templates:
@@ -103,7 +105,7 @@ stages:
 
   - id: scope_freeze
     owner: coordinator
-    outputs_required: [scope_freeze_gate_report]
+    outputs_required: [scope_freeze_gate_report, milestone_lock_report]
     exit_gate:
       approved_by: [coordinator]
       criteria:
@@ -112,6 +114,7 @@ stages:
         - "ui-ux-design-spec.md exists and is consistent with architecture constraints"
         - "Any remaining open questions are explicitly tracked and marked non-blocking"
         - "scope-freeze-gate-report.md exists and records freeze approval"
+        - "milestone-lock-report.md exists and records Milestone ID, locked keys, file hashes, and lock path"
 
   - id: parallel_dev
     owners: [backend-impl, frontend-web, frontend-miniapp, frontend-android]
@@ -119,6 +122,7 @@ stages:
     rules:
       - "Coordinator auto-generates TASK-IDs"
       - "Each task requires task-TASK-XXX-plan.md before coding"
+      - "All task plans must reference active milestone_id"
     exit_gate:
       approved_by: [coordinator]
       criteria:
@@ -143,7 +147,7 @@ stages:
     exit_gate:
       approved_by: [architect, coordinator]
       criteria:
-        - "architecture-review-gate-report.md exists and references the latest ADR/Impact/API/UIUX/Task artifacts from this run"
+        - "architecture-review-gate-report.md exists and references active milestone_id and latest ADR/Impact/API/UIUX/Task artifacts"
         - "Report includes consistency checks, risk review, blockers, and explicit decision (PASS/FAIL)"
         - "Any architecture-level gap found in implementation is either fixed or tracked with owner and due stage"
 
@@ -165,6 +169,7 @@ stages:
       criteria:
         - "qa-regression-matrix.md exists and includes smoke set + full regression set"
         - "qa-test-plan.md exists and maps to tasks"
+        - "qa-test-plan.md and qa-test-report.md both reference active milestone_id"
         - "qa-test-report.md exists and complies with verification_policy (default/ask/strict)"
         - "All TASK IDs in workflow-state.json are covered in qa-test-plan.md"
 
@@ -174,12 +179,11 @@ stages:
     outputs_required:
       [
         qa_release_signoff,
-        baseline_snapshot_report,
         release_candidate_gate_report,
       ]
     exit_gate:
       approved_by: [coordinator, qa]
       criteria:
         - "qa-release-signoff.md exists with Go/No-Go recommendation and accepted risks"
-        - "baseline-spec-snapshot-report.md exists and confirms frozen specs are synced to baseline directory"
+        - "active milestone lock exists and all locked keys still match artifacts (no unapproved drift)"
         - "release-candidate-gate-report.md exists and records final blockers, decision, and archive readiness"

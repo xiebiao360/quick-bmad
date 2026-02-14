@@ -16,6 +16,11 @@ YYYY-MM-DD
 - architecture
 - ...
 
+## Active Milestone
+- milestone_id:
+- lock file: `.bmad/milestones/<milestone-id>/milestone-lock.yml`
+- locked keys: prd / scope / adr / impact / ui_ux_spec / api_design
+
 ## TASK IDs
 - TASK-001
 - TASK-002
@@ -26,13 +31,8 @@ YYYY-MM-DD
 - task-TASK-001-plan.md
 - ...
 
-## Baseline Snapshot
-- baseline dir: `.bmad/baseline/spec/`
-- snapshot report: `.bmad/artifacts/baseline-spec-snapshot-report.md`
-- synced keys: prd / scope / adr / impact / ui_ux_spec / api_design
-
 ## PR / MR Links
-- 
+-
 
 ## QA Summary
 - Smoke set passed?

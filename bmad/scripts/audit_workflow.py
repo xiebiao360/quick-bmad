@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import sys
 from dataclasses import dataclass
@@ -18,6 +19,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
+
+
+DEFAULT_MILESTONE_KEYS = ["prd", "scope", "adr", "impact", "ui_ux_spec", "api_design"]
 
 
 @dataclass
@@ -36,6 +40,14 @@ def iso_to_datetime(value: str) -> Optional[dt.datetime]:
         return dt.datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def load_yaml(path: Path) -> Dict[str, Any]:
@@ -60,7 +72,7 @@ def check_workflow_definition(path: Path) -> Tuple[List[Finding], Dict[str, Any]
 
     artifacts = wf.get("artifacts")
     stages = wf.get("stages")
-    baseline = wf.get("baseline", {})
+    milestone = wf.get("milestone", {})
 
     if not isinstance(artifacts, dict):
         findings.append(
@@ -72,6 +84,7 @@ def check_workflow_definition(path: Path) -> Tuple[List[Finding], Dict[str, Any]
             )
         )
         artifacts = {}
+
     if not isinstance(stages, list) or not stages:
         findings.append(
             Finding(
@@ -82,46 +95,96 @@ def check_workflow_definition(path: Path) -> Tuple[List[Finding], Dict[str, Any]
             )
         )
         stages = []
-    if not isinstance(baseline, dict):
-        findings.append(
-            Finding(
-                "ERROR",
-                "WF_BASELINE_INVALID",
-                "workflow.baseline must be a mapping",
-                str(path),
-            )
-        )
-        baseline = {}
 
-    baseline_dir = baseline.get("dir", ".bmad/baseline/spec")
-    baseline_keys = baseline.get("keys", [])
-    if not isinstance(baseline_dir, str) or not baseline_dir.strip():
+    if not isinstance(milestone, dict):
         findings.append(
             Finding(
                 "ERROR",
-                "WF_BASELINE_DIR_INVALID",
-                "workflow.baseline.dir must be a non-empty string",
+                "WF_MILESTONE_INVALID",
+                "workflow.milestone must be a mapping",
                 str(path),
             )
         )
-    if baseline_keys and not isinstance(baseline_keys, list):
+        milestone = {}
+
+    milestone_enabled = milestone.get("enabled", True)
+    milestone_dir = milestone.get("dir", ".bmad/milestones")
+    milestone_pointer = milestone.get("active_pointer", ".bmad/milestones/ACTIVE")
+    milestone_lock_filename = milestone.get("lock_filename", "milestone-lock.yml")
+    milestone_keys = milestone.get("keys", DEFAULT_MILESTONE_KEYS)
+    milestone_enforce_stage = milestone.get("enforce_from_stage", "parallel_dev")
+
+    if not isinstance(milestone_enabled, bool):
         findings.append(
             Finding(
                 "ERROR",
-                "WF_BASELINE_KEYS_INVALID",
-                "workflow.baseline.keys must be a list",
+                "WF_MILESTONE_ENABLED_INVALID",
+                "workflow.milestone.enabled must be bool",
                 str(path),
             )
         )
-        baseline_keys = []
-    if isinstance(baseline_keys, list):
-        for key in baseline_keys:
+        milestone_enabled = True
+
+    if not isinstance(milestone_dir, str) or not milestone_dir.strip():
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_MILESTONE_DIR_INVALID",
+                "workflow.milestone.dir must be a non-empty string",
+                str(path),
+            )
+        )
+
+    if not isinstance(milestone_pointer, str) or not milestone_pointer.strip():
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_MILESTONE_POINTER_INVALID",
+                "workflow.milestone.active_pointer must be a non-empty string",
+                str(path),
+            )
+        )
+
+    if not isinstance(milestone_lock_filename, str) or not milestone_lock_filename.strip():
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_MILESTONE_LOCK_FILENAME_INVALID",
+                "workflow.milestone.lock_filename must be a non-empty string",
+                str(path),
+            )
+        )
+
+    if not isinstance(milestone_keys, list):
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_MILESTONE_KEYS_INVALID",
+                "workflow.milestone.keys must be a list",
+                str(path),
+            )
+        )
+        milestone_keys = []
+
+    if not isinstance(milestone_enforce_stage, str):
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_MILESTONE_ENFORCE_INVALID",
+                "workflow.milestone.enforce_from_stage must be string",
+                str(path),
+            )
+        )
+        milestone_enforce_stage = ""
+
+    if milestone_enabled:
+        for key in milestone_keys:
             if key not in artifacts:
                 findings.append(
                     Finding(
                         "ERROR",
-                        "WF_BASELINE_KEY_UNMAPPED",
-                        f"baseline key '{key}' is not mapped in workflow.artifacts",
+                        "WF_MILESTONE_KEY_UNMAPPED",
+                        f"milestone key '{key}' is not mapped in workflow.artifacts",
                         str(path),
                     )
                 )
@@ -150,6 +213,7 @@ def check_workflow_definition(path: Path) -> Tuple[List[Finding], Dict[str, Any]
                 )
             )
             continue
+
         stage_ids.append(sid)
 
         owner = stage.get("owner")
@@ -208,14 +272,35 @@ def check_workflow_definition(path: Path) -> Tuple[List[Finding], Dict[str, Any]
             )
         )
 
+    if (
+        milestone_enabled
+        and milestone_enforce_stage
+        and milestone_enforce_stage not in stage_ids
+    ):
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_MILESTONE_ENFORCE_STAGE_UNKNOWN",
+                f"workflow.milestone.enforce_from_stage '{milestone_enforce_stage}' is not a valid stage id",
+                str(path),
+            )
+        )
+
     metadata = {
         "path": path,
         "artifacts_dir": wf.get("artifacts_dir", ".bmad/artifacts"),
         "artifacts": artifacts,
-        "baseline": baseline,
         "stages": stages,
         "stage_ids": stage_ids,
         "workflow": wf.get("workflow", {}),
+        "milestone": {
+            "enabled": milestone_enabled,
+            "dir": milestone_dir,
+            "active_pointer": milestone_pointer,
+            "lock_filename": milestone_lock_filename,
+            "keys": [str(k) for k in milestone_keys],
+            "enforce_from_stage": milestone_enforce_stage,
+        },
     }
     return findings, metadata
 
@@ -234,6 +319,8 @@ def required_tokens_for_artifact(artifact_key: str, filename: str) -> List[str]:
         tokens.extend(["Verification Method", "Overall Status"])
     if artifact_key == "architecture_review_gate_report":
         tokens.extend(["Review Scope", "Gate Status"])
+    if artifact_key == "milestone_lock_report":
+        tokens.extend(["Milestone ID", "Locked Keys", "Lock File"])
     return tokens
 
 
@@ -273,6 +360,252 @@ def check_artifact_minimum_content(
     return findings
 
 
+def resolve_lock_path(repo_root: Path, state_value: str) -> Path:
+    p = Path(state_value)
+    if p.is_absolute():
+        return p
+    return repo_root / p
+
+
+def check_milestone_consistency(
+    *,
+    repo_root: Path,
+    state_path: Path,
+    state: Dict[str, Any],
+    workflow_meta: Dict[str, Any],
+    stage_index: Dict[str, int],
+    current_stage: Any,
+    completed: List[str],
+) -> List[Finding]:
+    findings: List[Finding] = []
+    milestone: Dict[str, Any] = workflow_meta.get("milestone", {})
+    if not milestone.get("enabled", True):
+        return findings
+
+    milestone_id = state.get("milestone_id")
+    milestone_lock_path_value = state.get("milestone_lock_path")
+
+    require_milestone = False
+    scope_freeze_idx = stage_index.get("scope_freeze")
+    enforce_stage = milestone.get("enforce_from_stage")
+    enforce_idx = stage_index.get(enforce_stage) if isinstance(enforce_stage, str) else None
+
+    if scope_freeze_idx is not None and len(completed) > scope_freeze_idx:
+        require_milestone = True
+
+    if enforce_idx is not None:
+        if len(completed) >= enforce_idx:
+            require_milestone = True
+        if isinstance(current_stage, str) and current_stage in stage_index:
+            if stage_index[current_stage] >= enforce_idx:
+                require_milestone = True
+
+    if not require_milestone:
+        return findings
+
+    if not isinstance(milestone_id, str) or not milestone_id.strip():
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_MILESTONE_ID_MISSING",
+                "milestone is required at current stage but state.milestone_id is missing",
+                str(state_path),
+            )
+        )
+        return findings
+
+    if not isinstance(milestone_lock_path_value, str) or not milestone_lock_path_value.strip():
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_MILESTONE_LOCK_PATH_MISSING",
+                "milestone is required at current stage but state.milestone_lock_path is missing",
+                str(state_path),
+            )
+        )
+        return findings
+
+    lock_path = resolve_lock_path(repo_root, milestone_lock_path_value)
+    expected_lock = (
+        repo_root
+        / str(milestone.get("dir", ".bmad/milestones"))
+        / milestone_id
+        / str(milestone.get("lock_filename", "milestone-lock.yml"))
+    )
+    if lock_path.resolve() != expected_lock.resolve():
+        findings.append(
+            Finding(
+                "WARN",
+                "STATE_MILESTONE_LOCK_PATH_UNEXPECTED",
+                f"state.milestone_lock_path differs from expected convention: {expected_lock}",
+                str(state_path),
+            )
+        )
+
+    if not lock_path.exists():
+        findings.append(
+            Finding(
+                "ERROR",
+                "MILESTONE_LOCK_MISSING",
+                f"milestone lock file does not exist: {lock_path}",
+                str(lock_path),
+            )
+        )
+        return findings
+
+    try:
+        lock_data = load_yaml(lock_path)
+    except Exception as exc:
+        findings.append(
+            Finding(
+                "ERROR",
+                "MILESTONE_LOCK_INVALID",
+                f"failed to parse milestone lock: {exc}",
+                str(lock_path),
+            )
+        )
+        return findings
+
+    files = lock_data.get("files")
+    if not isinstance(files, dict):
+        findings.append(
+            Finding(
+                "ERROR",
+                "MILESTONE_LOCK_FILES_INVALID",
+                "milestone lock must include files mapping",
+                str(lock_path),
+            )
+        )
+        return findings
+
+    lock_id = lock_data.get("milestone_id")
+    if isinstance(lock_id, str) and lock_id.strip() and lock_id != milestone_id:
+        findings.append(
+            Finding(
+                "ERROR",
+                "MILESTONE_ID_MISMATCH",
+                f"state milestone_id '{milestone_id}' does not match lock milestone_id '{lock_id}'",
+                str(lock_path),
+            )
+        )
+
+    artifacts: Dict[str, str] = workflow_meta["artifacts"]
+    artifacts_dir: str = workflow_meta["artifacts_dir"]
+    milestone_keys = milestone.get("keys", [])
+    if not isinstance(milestone_keys, list):
+        milestone_keys = []
+
+    for key in milestone_keys:
+        filename = artifacts.get(key)
+        if not filename:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_ARTIFACT_UNMAPPED",
+                    f"milestone key '{key}' is not mapped in workflow artifacts",
+                    str(state_path),
+                )
+            )
+            continue
+
+        entry = files.get(key)
+        if not isinstance(entry, dict):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_LOCK_ENTRY_MISSING",
+                    f"milestone lock missing entry for key '{key}'",
+                    str(lock_path),
+                )
+            )
+            continue
+
+        locked_path_value = entry.get("locked_path")
+        expected_hash = entry.get("sha256")
+        lock_artifact_name = entry.get("artifact")
+
+        if not isinstance(locked_path_value, str) or not locked_path_value.strip():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_LOCKED_PATH_INVALID",
+                    f"milestone entry '{key}' has invalid locked_path",
+                    str(lock_path),
+                )
+            )
+            continue
+
+        if not isinstance(expected_hash, str) or not expected_hash.strip():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_LOCK_HASH_INVALID",
+                    f"milestone entry '{key}' has invalid sha256",
+                    str(lock_path),
+                )
+            )
+            continue
+
+        if isinstance(lock_artifact_name, str) and lock_artifact_name != filename:
+            findings.append(
+                Finding(
+                    "WARN",
+                    "MILESTONE_LOCK_ARTIFACT_NAME_DRIFT",
+                    f"milestone entry '{key}' artifact name '{lock_artifact_name}' differs from workflow mapping '{filename}'",
+                    str(lock_path),
+                )
+            )
+
+        locked_path = resolve_lock_path(repo_root, locked_path_value)
+        if not locked_path.exists() or locked_path.stat().st_size == 0:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_LOCKED_FILE_MISSING",
+                    f"milestone locked file missing/empty for key '{key}': {locked_path}",
+                    str(locked_path),
+                )
+            )
+            continue
+
+        locked_hash = sha256_file(locked_path)
+        if locked_hash != expected_hash:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_LOCK_HASH_MISMATCH",
+                    f"milestone locked file hash mismatch for key '{key}'",
+                    str(locked_path),
+                )
+            )
+            continue
+
+        artifact_path = resolve_artifact_path(repo_root, artifacts_dir, filename)
+        if not artifact_path.exists() or artifact_path.stat().st_size == 0:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_ARTIFACT_MISSING",
+                    f"artifact missing/empty for milestone key '{key}': {artifact_path}",
+                    str(artifact_path),
+                )
+            )
+            continue
+
+        artifact_hash = sha256_file(artifact_path)
+        if artifact_hash != expected_hash:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "MILESTONE_ARTIFACT_DRIFT",
+                    f"artifact drift detected for milestone key '{key}'",
+                    str(artifact_path),
+                )
+            )
+
+    return findings
+
+
 def check_state_against_workflow(
     repo_root: Path,
     state_path: Path,
@@ -309,6 +642,7 @@ def check_state_against_workflow(
                 str(state_path),
             )
         )
+
     for field in unknown_fields:
         findings.append(
             Finding(
@@ -323,7 +657,6 @@ def check_state_against_workflow(
     stages: List[Dict[str, Any]] = workflow_meta["stages"]
     artifacts: Dict[str, str] = workflow_meta["artifacts"]
     artifacts_dir: str = workflow_meta["artifacts_dir"]
-    baseline: Dict[str, Any] = workflow_meta.get("baseline", {})
     stage_index = {sid: i for i, sid in enumerate(stage_ids)}
 
     current_stage = state.get("current_stage")
@@ -369,6 +702,7 @@ def check_state_against_workflow(
                 str(state_path),
             )
         )
+
     for sid in completed:
         if sid not in stage_index:
             findings.append(
@@ -406,6 +740,7 @@ def check_state_against_workflow(
                     )
                 )
                 continue
+
             artifact_path = resolve_artifact_path(repo_root, artifacts_dir, filename)
             if not artifact_path.exists():
                 findings.append(
@@ -417,6 +752,7 @@ def check_state_against_workflow(
                     )
                 )
                 continue
+
             if artifact_path.stat().st_size == 0:
                 findings.append(
                     Finding(
@@ -430,6 +766,7 @@ def check_state_against_workflow(
                 findings.extend(
                     check_artifact_minimum_content(artifact_path, key, filename)
                 )
+
             if filename not in artifacts_created:
                 findings.append(
                     Finding(
@@ -489,6 +826,7 @@ def check_state_against_workflow(
                 str(state_path),
             )
         )
+
     verification_decision = state.get("verification_decision")
     if verification_decision not in {"unknown", "execute", "skip"}:
         findings.append(
@@ -520,28 +858,17 @@ def check_state_against_workflow(
             )
         )
 
-    if "release_candidate" in completed and isinstance(baseline, dict):
-        baseline_dir = baseline.get("dir", ".bmad/baseline/spec")
-        baseline_keys = baseline.get("keys", [])
-        if (
-            isinstance(baseline_dir, str)
-            and baseline_dir.strip()
-            and isinstance(baseline_keys, list)
-        ):
-            for key in baseline_keys:
-                filename = artifacts.get(key)
-                if not filename:
-                    continue
-                baseline_file = repo_root / baseline_dir / filename
-                if not baseline_file.exists() or baseline_file.stat().st_size == 0:
-                    findings.append(
-                        Finding(
-                            "ERROR",
-                            "BASELINE_FILE_MISSING",
-                            f"release_candidate is completed but baseline file missing/empty for key '{key}': {baseline_file}",
-                            str(baseline_file),
-                        )
-                    )
+    findings.extend(
+        check_milestone_consistency(
+            repo_root=repo_root,
+            state_path=state_path,
+            state=state,
+            workflow_meta=workflow_meta,
+            stage_index=stage_index,
+            current_stage=current_stage,
+            completed=completed,
+        )
+    )
 
     return findings
 
@@ -610,11 +937,12 @@ def main() -> int:
                 )
             )
             continue
+
         try:
             wf_findings, meta = check_workflow_definition(wf_path)
             findings.extend(wf_findings)
-            workflow_meta_by_path[str(wf_path)] = meta
-        except Exception as exc:  # pragma: no cover - defensive error surfacing
+            workflow_meta_by_path[str(wf_path.resolve())] = meta
+        except Exception as exc:
             findings.append(
                 Finding(
                     "ERROR",
@@ -626,6 +954,7 @@ def main() -> int:
 
     state_path = repo_root / args.state
     template_path = repo_root / args.template
+
     if state_path.exists():
         try:
             state = load_json(state_path)
@@ -637,6 +966,7 @@ def main() -> int:
                     wf_findings, meta = check_workflow_definition(resolved)
                     findings.extend(wf_findings)
                     workflow_meta_by_path[str(resolved)] = meta
+
                 if meta:
                     findings.extend(
                         check_state_against_workflow(
@@ -664,7 +994,7 @@ def main() -> int:
                         str(state_path),
                     )
                 )
-        except Exception as exc:  # pragma: no cover - defensive error surfacing
+        except Exception as exc:
             findings.append(
                 Finding(
                     "ERROR",

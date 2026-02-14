@@ -33,9 +33,9 @@ if [[ -d "$TARGET/bmad/workflows" ]]; then
   need bmad/project/validation-profile.template.yml
   need bmad/project/coding-profile.template.yml
 
-  need bmad/scripts/spec_baseline.py
+  need bmad/scripts/milestone_lock.py
   need bmad/scripts/audit_workflow.py
-  need bmad/baseline/spec/README.md
+  need bmad/milestones/README.md
 
   need docs/development/ai-dev-launch-guide.md
   need docs/development/ai-dev-coding-guardrails.md
@@ -48,7 +48,7 @@ if [[ -d "$TARGET/bmad/workflows" ]]; then
   need claude/skills/frontend-miniapp/SKILL.md
   need claude/skills/frontend-android/SKILL.md
   need claude/skills/qa-executor/SKILL.md
-  need claude/skills/baseline-spec/SKILL.md
+  need claude/skills/milestone-lock/SKILL.md
 
   need scripts/install.sh
   need scripts/verify.sh
@@ -68,9 +68,9 @@ else
   need .bmad/project/validation-profile.yml
   need .bmad/project/coding-profile.yml
 
-  need .bmad/scripts/spec_baseline.py
+  need .bmad/scripts/milestone_lock.py
   need .bmad/scripts/audit_workflow.py
-  need .bmad/baseline/spec/README.md
+  need .bmad/milestones/README.md
 
   need docs/development/ai-dev-launch-guide.md
   need docs/development/ai-dev-coding-guardrails.md
@@ -83,7 +83,7 @@ else
   need .claude/skills/frontend-miniapp/SKILL.md
   need .claude/skills/frontend-android/SKILL.md
   need .claude/skills/qa-executor/SKILL.md
-  need .claude/skills/baseline-spec/SKILL.md
+  need .claude/skills/milestone-lock/SKILL.md
 
   echo "OK: BMAD installation looks complete at $TARGET"
 fi

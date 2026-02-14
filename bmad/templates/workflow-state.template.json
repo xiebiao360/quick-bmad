@@ -12,6 +12,10 @@
   "current_stage": "",
   "completed_stages": [],
 
+  "milestone_id": "",
+  "milestone_lock_path": "",
+  "milestone_locked_at": "",
+
   "task_ids": [],
 
   "artifacts_created": [],

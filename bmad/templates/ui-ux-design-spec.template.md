@@ -6,7 +6,7 @@
 **References**:
 - PRD: `.bmad/artifacts/discovery-prd.md`
 - Scope: `.bmad/artifacts/discovery-scope-definition.md`
-- Project baseline (optional): `docs/design/ui-ux-design-spec.md`
+- Project reference spec (optional): `docs/design/ui-ux-design-spec.md`
 
 ## 1. Summary
 - Product positioning (1-2 sentences)

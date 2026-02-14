@@ -22,16 +22,20 @@ PM / UI-UX Designer / Architect / Backend / Frontend Web (Admin) / Frontend Mini
      - default（默认）：不要求执行证据，但所有测试项必须标记 NOT EXECUTED；禁止 PASS/FAIL
      - ask：进入 qa_validation（或 bugfix validate）前必须询问用户是否执行验证；未得到用户决策不得推进
      - strict：必须提供执行证据（manual-run 或 automated-run）；否则 Gate NO
-   - 解析可选参数 baseline（启动 seed 策略）：
-     - auto（默认）：遵循 workflow.baseline.auto_seed_on_start
-     - seed：强制执行 baseline seed（即使 auto_seed_on_start=false）
-     - skip：跳过 baseline seed
-   - 解析可选参数 baseline_force：
-     - false（默认）：seed 不覆盖 artifacts 中已存在文件
-     - true：seed 时允许覆盖（传递 `--force`）
-   - 解析可选参数 baseline_import_archive：
-     - latest：启动前先执行 import-archive（使用最新 archive）
-     - <path>：启动前先执行 import-archive（使用指定 archive 路径）
+   - 解析可选参数 milestone_use：
+     - auto（默认）：若存在 ACTIVE milestone，则执行 use
+     - require：必须成功 use milestone，否则 Gate NO
+     - skip：跳过 milestone use（适合全新规格起草）
+   - 解析可选参数 milestone_id：
+     - 指定要使用的 milestone（默认读取 `.bmad/milestones/ACTIVE`）
+   - 解析可选参数 milestone_force：
+     - false（默认）：use 不覆盖 artifacts 中已存在文件
+     - true：use 时允许覆盖（传递 `--force`）
+   - 解析可选参数 milestone_import_archive：
+     - latest：启动前先从最新 archive 创建 milestone lock
+     - <path>：启动前先从指定 archive 路径创建 milestone lock
+   - 解析可选参数 milestone_create_id：
+     - 当使用 milestone_import_archive 时，指定导入后的 milestone_id（必填）
    - 读取 validation 配置（必须）：
      - workflow.validation.guide_path：项目验证指南路径（例如 docs/development/ai-dev-launch-guide.md）
      - workflow.validation.profile_path：项目验证配置路径（可选，建议 .bmad/project/validation-profile.yml）
@@ -44,11 +48,12 @@ PM / UI-UX Designer / Architect / Backend / Frontend Web (Admin) / Frontend Mini
    - 若缺失 governance.coding_guide_path 或文件不存在：
      - Gate Status: NO
      - Blocker: missing project coding governance guide configuration
-   - 读取 baseline 配置（建议，缺失时使用默认）：
-     - workflow.baseline.dir（默认：.bmad/baseline/spec）
-     - workflow.baseline.keys（默认：[prd, scope, adr, impact, ui_ux_spec, api_design]）
-     - workflow.baseline.auto_seed_on_start（默认：true）
-   - 若 baseline.dir 不存在：自动创建（不得阻断启动）
+   - 读取 milestone 配置（建议，缺失时使用默认）：
+     - workflow.milestone.dir（默认：.bmad/milestones）
+     - workflow.milestone.keys（默认：[prd, scope, adr, impact, ui_ux_spec, api_design]）
+     - workflow.milestone.active_pointer（默认：.bmad/milestones/ACTIVE）
+     - workflow.milestone.enforce_from_stage（默认：parallel_dev）
+   - 若 milestone.dir 不存在：自动创建（不得阻断启动）
    - 将 verification_policy 写入 .bmad/artifacts/workflow-state.json：
      - state.verification_policy = <default|ask|strict>
      - state.verification_decision = "unknown"
@@ -67,22 +72,24 @@ PM / UI-UX Designer / Architect / Backend / Frontend Web (Admin) / Frontend Mini
 3) 确保以下目录存在：
    - .bmad/artifacts/
    - .bmad/archive/
-   - .bmad/baseline/spec/
+   - .bmad/milestones/
    - .bmad/templates/（若 bugfix workflow 需要）
 
 4) 启动前污染检测（Artifacts Workspace Hygiene）：
    - 扫描 .bmad/artifacts/ 是否为空（忽略占位文件如 .gitkeep）。
 
    A) 若 artifacts 为空（CLEAN）：
-      - 若 baseline_import_archive 已设置：
-        - 先执行 import-archive（latest 或指定 path）
-      - baseline seed 执行条件：
-        - baseline=seed → 必执行
-        - baseline=skip → 不执行
-        - baseline=auto → 仅当 workflow.baseline.auto_seed_on_start=true 执行
-      - 当需要 seed 时：
-        - 执行 `python3 .bmad/scripts/spec_baseline.py --workflow <resolved-workflow> seed [--force]`
-        - 将 baseline 中存在的冻结规格回填到 artifacts
+      - 若 milestone_import_archive 已设置：
+        - 先执行：
+          `python3 .bmad/scripts/milestone_lock.py --workflow <resolved-workflow> import-archive --milestone-id <milestone_create_id> [--archive-dir <path>]`
+        - 导入成功后更新 ACTIVE 指针
+      - milestone use 执行条件：
+        - milestone_use=require → 必执行且必须成功
+        - milestone_use=skip → 不执行
+        - milestone_use=auto → 若存在 ACTIVE milestone 则执行 use
+      - 当需要 use 时：
+        - 执行 `python3 .bmad/scripts/milestone_lock.py --workflow <resolved-workflow> use [--milestone-id <milestone_id>] [--force]`
+        - 将 milestone lock 中的冻结规格回填到 artifacts
       - 继续执行启动流程（进入第 4 步）。
 
    B) 若 artifacts 非空（DIRTY）：
@@ -172,7 +179,7 @@ PM / UI-UX Designer / Architect / Backend / Frontend Web (Admin) / Frontend Mini
 - 涉及 API 的任务必须在 Task Protocol 中明确兼容性与回滚策略
 - 并行阶段不得突破 frozen spec
 - 所有产物必须写入 .bmad/artifacts/
-- 冻结规格（PRD/Scope/ADR/Impact/UIUX/API）必须在归档前同步到 .bmad/baseline/spec/，用于后续 workflow 继承。
+- 冻结规格（PRD/Scope/ADR/Impact/UIUX/API）必须在 scope_freeze 阶段生成 milestone lock；后续阶段必须绑定该 milestone_id。
 - Stage-1（Architecture）产物必须由 architect-design skill 生成
 - Coordinator 不代写 ADR，只负责 Gate 校验
 - QA artifacts（qa-regression-matrix.md / qa-test-plan.md / qa-release-signoff.md）必须由 qa-lead skill 生成。
@@ -692,6 +699,10 @@ Breaking 判断
   "current_stage": "string",
   "completed_stages": "string[]",
 
+  "milestone_id": "string",
+  "milestone_lock_path": "string",
+  "milestone_locked_at": "string(ISO8601)",
+
   "task_ids": "string[]",
 
   "artifacts_created": "string[]",
@@ -719,6 +730,9 @@ Breaking 判断
 - last_updated_at：同 started_at
 - current_stage：workflow 的第一个 stage id
 - completed_stages：[]
+- milestone_id：""（未绑定时为空）
+- milestone_lock_path：""（未绑定时为空）
+- milestone_locked_at：""（scope_freeze 锁定后填写）
 - task_ids：[]
 - artifacts_created：[]
 - archived：false
@@ -736,6 +750,8 @@ A) Stage Gate 通过（Gate Status: YES）时：
 - current_stage 更新为下一 stage（若无下一 stage，保持不变或写为 "DONE"）
 - last_updated_at 更新为当前时间
 - artifacts_created 追加本 stage outputs_required 对应的 artifact 文件名（去重）
+- 若当前 stage=scope_freeze：
+  - milestone_id / milestone_lock_path / milestone_locked_at 必须已写入 state
 
 B) 创建新任务（生成 task-TASK-XXX-plan.md）时：
 - 将 TASK-XXX 追加到 task_ids（去重）
@@ -743,6 +759,12 @@ B) 创建新任务（生成 task-TASK-XXX-plan.md）时：
 
 C) bugfix-task-plan.md 生成 TASK-ID 时：
 - 将该 TASK-ID 追加到 task_ids（去重）
+- last_updated_at 更新
+
+D) 执行 milestone use/create/import-archive 成功时：
+- milestone_id 更新为本次使用/创建的 id
+- milestone_lock_path 更新为 lock 文件路径
+- milestone_locked_at 更新为当前时间
 - last_updated_at 更新
 
 禁止事项：
@@ -774,10 +796,10 @@ C) bugfix-task-plan.md 生成 TASK-ID 时：
    .bmad/archive/<YYYY-MM-DD>-<mode>-<short_name>/
 
 3) 归档时：
-   - 先执行 baseline 快照（必须）：
-     `python3 .bmad/scripts/spec_baseline.py --workflow <resolved-workflow> snapshot`
-     - 将本轮冻结规格同步到 .bmad/baseline/spec/
-     - 生成 .bmad/artifacts/baseline-spec-snapshot-report.md
+   - 先执行 milestone 校验（必须）：
+     `python3 .bmad/scripts/milestone_lock.py --workflow <resolved-workflow> verify [--milestone-id <state.milestone_id>]`
+     - 校验 artifacts 与当前 milestone lock hash 一致
+     - 生成 .bmad/artifacts/milestone-verify-report.md
    - 将 .bmad/artifacts/ 下所有文件（包括 workflow-state.json）
      移动到归档目录
    - 在归档目录生成 archive-manifest.md（由归档策略定义）
@@ -815,9 +837,9 @@ C) bugfix-task-plan.md 生成 TASK-ID 时：
    .bmad/archive/<YYYY-MM-DD>-<mode>-<short-name>/
 
 4) 归档时：
-   - 先执行 baseline 快照（必须）：
-     `python3 .bmad/scripts/spec_baseline.py --workflow <resolved-workflow> snapshot`
-     - 冻结规格写入 .bmad/baseline/spec/（长期保留，不随 run 归档移动）
+   - 先执行 milestone 校验（必须）：
+     `python3 .bmad/scripts/milestone_lock.py --workflow <resolved-workflow> verify [--milestone-id <state.milestone_id>]`
+     - 校验通过后才允许归档（防止未审批规格漂移）
    - 将本轮 workflow 涉及的所有 artifacts
      从 .bmad/artifacts/ 移动到归档目录
    - 保留目录结构
@@ -834,52 +856,58 @@ C) bugfix-task-plan.md 生成 TASK-ID 时：
 
 5) 归档完成后：
    - .bmad/artifacts/ 可被清空
-   - .bmad/baseline/spec/ 保留并作为后续 run 的 seed 来源
+   - .bmad/milestones/ 保留并作为后续 run 的可审计规格版本库
    - 下一轮 workflow 重新生成新 artifacts。
 
 ================================================
 
-【Baseline 继承机制（跨 workflow）】
+【Milestone 版本化机制（跨 workflow）】
 
 目标：
-- 解决“归档后下一轮找不到 PRD/UIUX/ADR”等冻结规格文档的问题。
+- 每个交付周期固定一版规格契约（PRD/Scope/ADR/Impact/UIUX/API）。
+- 下一期需求到来时创建新 milestone，而不是覆盖旧版。
 
 规则：
-1) Baseline 存储路径：
-   - `.bmad/baseline/spec/`
-2) 默认纳入 baseline 的规格键：
-   - `prd, scope, adr, impact, ui_ux_spec, api_design`
-3) 新 run 启动（artifacts CLEAN）且 auto_seed_on_start=true 时：
-   - 执行 seed（仅补缺失，不覆盖已有 artifacts）
-4) run 完成归档前：
-   - 必须先执行 snapshot（以 artifacts 最新冻结规格覆盖 baseline）
-5) baseline 不参与 run 归档移动：
-   - archive 仅保存“本轮副本”
-   - baseline 始终保留为下一轮输入基线
+1) Milestone 存储路径：
+   - `.bmad/milestones/<milestone-id>/`
+   - lock 文件：`milestone-lock.yml`
+2) ACTIVE 指针：
+   - `.bmad/milestones/ACTIVE`
+   - 用于新 run 选择默认 milestone
+3) 在 scope_freeze 通过时：
+   - 必须执行：
+     `python3 .bmad/scripts/milestone_lock.py --workflow <resolved-workflow> create --milestone-id <milestone-id>`
+   - 产出 `.bmad/artifacts/milestone-lock-report.md`
+4) 在 parallel_dev / architecture_review / qa_validation / release_candidate：
+   - 必须执行 milestone verify，若发生 drift → Gate NO
+5) 归档不修改历史 milestone：
+   - 归档保存本轮 artifacts 副本
+   - milestone 仓库长期保留，支持审计与回滚
 
 ================================================
 
 【斜杠命令推荐用法】
 
-1) 主流程启动（默认自动 seed）：
-   - `/coordinator`
+1) 主流程启动并自动尝试 use ACTIVE milestone：
+   - `/coordinator milestone_use=auto`
 
-2) 主流程启动并强制 seed：
-   - `/coordinator baseline=seed`
+2) 主流程启动并强制要求 milestone：
+   - `/coordinator milestone_use=require milestone_id=<id>`
 
-3) 主流程启动并跳过 seed：
-   - `/coordinator baseline=skip`
+3) 主流程启动并跳过 milestone use（全新规格起草）：
+   - `/coordinator milestone_use=skip`
 
-4) 主流程启动前先从 archive 导入 baseline：
-   - `/coordinator baseline_import_archive=latest baseline=seed`
+4) 主流程启动前先从 archive 创建 milestone：
+   - `/coordinator milestone_import_archive=latest milestone_create_id=<id> milestone_use=require`
    - 或
-   - `/coordinator baseline_import_archive=.bmad/archive/<dir> baseline=seed`
+   - `/coordinator milestone_import_archive=.bmad/archive/<dir> milestone_create_id=<id> milestone_use=require`
 
-5) 单独管理 baseline（不推进 stage）：
-   - `/baseline-spec action=status workflow=.bmad/workflows/workflow.yml strict=true`
-   - `/baseline-spec action=seed workflow=.bmad/workflows/workflow.yml`
-   - `/baseline-spec action=snapshot workflow=.bmad/workflows/workflow.yml`
-   - `/baseline-spec action=import-archive workflow=.bmad/workflows/workflow.yml archive_dir=.bmad/archive/<dir>`
+5) 单独管理 milestone（不推进 stage）：
+   - `/milestone-lock action=status workflow=.bmad/workflows/workflow.yml strict=true`
+   - `/milestone-lock action=create workflow=.bmad/workflows/workflow.yml milestone_id=<id>`
+   - `/milestone-lock action=use workflow=.bmad/workflows/workflow.yml milestone_id=<id>`
+   - `/milestone-lock action=verify workflow=.bmad/workflows/workflow.yml milestone_id=<id>`
+   - `/milestone-lock action=import-archive workflow=.bmad/workflows/workflow.yml milestone_id=<id> archive_dir=.bmad/archive/<dir>`
 
 ================================================
 

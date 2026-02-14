@@ -62,7 +62,7 @@ Phase 2 — Freeze Design Tokens
   - radius/shadow
   - motion（列表入场、页面切换、按钮反馈）
 - 若项目已有 `docs/design/ui-ux-design-spec.md`：
-  - 将其作为 baseline；
+  - 将其作为项目参考规范；
   - 在 artifacts 文档中明确“本轮冻结版本”的差异与原因。
 
 Phase 3 — Component Contract

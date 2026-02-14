@@ -7,6 +7,7 @@
 - Coordinator / PM / Architect / QA skills
 - QA 执行者（qa-executor）
 - 项目级“验证指南 + 编码护栏”模板
+- Milestone Lock（版本化规格冻结）
 - 完整性校验脚本（`scripts/verify.sh`）
 
 ## 包结构
@@ -18,12 +19,18 @@ quick-bmad/
 │   │   ├── workflow.yml
 │   │   └── bugfix.yml
 │   ├── templates/
+│   ├── scripts/
+│   │   ├── milestone_lock.py
+│   │   └── audit_workflow.py
+│   ├── milestones/
+│   │   └── README.md
 │   └── project/
 │       ├── validation-profile.template.yml
 │       └── coding-profile.template.yml
 ├── claude/
 │   └── skills/
 │       ├── coordinator/
+│       ├── milestone-lock/
 │       ├── pm-prep/
 │       ├── pm-discovery/
 │       ├── architect-design/
@@ -38,6 +45,7 @@ quick-bmad/
 │       ├── ai-dev-launch-guide.md
 │       └── ai-dev-coding-guardrails.md
 └── scripts/
+    ├── install.sh
     └── verify.sh
 ```
 
@@ -52,7 +60,7 @@ quick-bmad/
 主流程：
 
 ```text
-/coordinator verification_policy=default
+/coordinator verification_policy=default milestone_use=auto
 ```
 
 Bugfix 流程：
@@ -77,28 +85,28 @@ Bugfix 流程：
 3. `Skill ... cannot be used with Skill tool due to disable-model-invocation`
 - 检查目标 skill frontmatter 中的 `disable-model-invocation`。
 
-## Baseline 继承（新增）
+## Milestone 版本化（推荐）
 
-为避免归档后丢失 PRD/UIUX/ADR 等冻结规格，新增 baseline 机制：
+为保证“每一期开发固定依赖一版 PRD/Arch/UIUX/API”，推荐使用 milestone lock：
 
-- 基线路径：`.bmad/baseline/spec/`
-- 主流程可在启动时自动 seed（回填缺失规格到 `.bmad/artifacts/`）
-- 归档前应做 snapshot（将最新冻结规格写回 baseline）
+- 锁目录：`.bmad/milestones/<milestone-id>/`
+- 锁文件：`.bmad/milestones/<milestone-id>/milestone-lock.yml`
+- 活动指针：`.bmad/milestones/ACTIVE`
 
 推荐斜杠命令：
 
 ```text
-/coordinator baseline=auto
-/coordinator baseline=seed
-/coordinator baseline=skip
-/coordinator baseline_import_archive=latest baseline=seed
+/coordinator milestone_use=auto
+/coordinator milestone_use=require milestone_id=<id>
+/coordinator milestone_import_archive=latest milestone_create_id=<id> milestone_use=require
 ```
 
-单独操作 baseline：
+单独操作 milestone：
 
 ```text
-/baseline-spec action=status workflow=.bmad/workflows/workflow.yml strict=true
-/baseline-spec action=seed workflow=.bmad/workflows/workflow.yml
-/baseline-spec action=snapshot workflow=.bmad/workflows/workflow.yml
-/baseline-spec action=import-archive workflow=.bmad/workflows/workflow.yml archive_dir=.bmad/archive/<dir>
+/milestone-lock action=status workflow=.bmad/workflows/workflow.yml strict=true
+/milestone-lock action=create workflow=.bmad/workflows/workflow.yml milestone_id=<id>
+/milestone-lock action=use workflow=.bmad/workflows/workflow.yml milestone_id=<id>
+/milestone-lock action=verify workflow=.bmad/workflows/workflow.yml milestone_id=<id>
+/milestone-lock action=import-archive workflow=.bmad/workflows/workflow.yml milestone_id=<id> archive_dir=.bmad/archive/<dir>
 ```
