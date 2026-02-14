@@ -1,9 +1,9 @@
 # Repro Steps
 
 ## Environment
-- Platform: admin-web / pos-app / backend
+- Platform: admin-web / miniapp / backend
 - Version/build:
-- Device (if pos-app):
+- Device (if miniapp): model / OS / WeChat version
 - Account/role:
 - Network (if relevant):
 

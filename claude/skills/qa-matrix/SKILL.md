@@ -24,7 +24,7 @@ disable-model-invocation: true
    - Implement 的 Allowed Scope / Forbidden Scope
    - Quality Review 的“潜在回归点”“必测用例”
 2) 合并去重，按“组件维度”组织：
-   - admin-web / pos-app / backend / cross-cutting（鉴权、网关、权限、支付、打印等）
+   - admin-web / miniapp / backend / cross-cutting（鉴权、网关、权限、支付、打印等）
 3) 给每条回归点打标签：
    - Severity: P0/P1/P2
    - Type: Smoke / Regression / Integration / E2E

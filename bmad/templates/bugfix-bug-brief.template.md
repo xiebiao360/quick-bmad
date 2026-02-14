@@ -17,7 +17,7 @@
 
 ## Impacted Components
 - [ ] admin-web
-- [ ] pos-app
+- [ ] miniapp
 - [ ] backend
 - [ ] cross-cutting (auth/gateway/permissions/payment/printing/etc.)
 

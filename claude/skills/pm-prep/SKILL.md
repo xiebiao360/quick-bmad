@@ -178,7 +178,7 @@ pm-prep-implementation-outline.md
 - Summary
 - MVP Path
 - Candidate Epics
-- Task Buckets（Backend / Frontend / Android / QA）
+- Task Buckets（UI/UX / Backend / Admin Web / MiniApp / Android / QA）
 - Data / API Touchpoints
 - Migration Concerns
 - Draft Rollout Strategy
