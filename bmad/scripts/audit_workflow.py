@@ -1,0 +1,690 @@
+#!/usr/bin/env python3
+"""Audit BMAD workflow definitions and runtime state/evidence consistency.
+
+Usage:
+  python3 .bmad/scripts/audit_workflow.py
+  python3 .bmad/scripts/audit_workflow.py --workflow .bmad/workflows/workflow.yml
+  python3 .bmad/scripts/audit_workflow.py --state .bmad/artifacts/workflow-state.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import yaml
+
+
+@dataclass
+class Finding:
+    severity: str  # ERROR | WARN | INFO
+    code: str
+    message: str
+    ref: Optional[str] = None
+
+
+def iso_to_datetime(value: str) -> Optional[dt.datetime]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def load_yaml(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"YAML root must be object: {path}")
+    return data
+
+
+def load_json(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"JSON root must be object: {path}")
+    return data
+
+
+def check_workflow_definition(path: Path) -> Tuple[List[Finding], Dict[str, Any]]:
+    findings: List[Finding] = []
+    wf = load_yaml(path)
+
+    artifacts = wf.get("artifacts")
+    stages = wf.get("stages")
+    baseline = wf.get("baseline", {})
+
+    if not isinstance(artifacts, dict):
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_ARTIFACTS_MISSING",
+                "workflow.artifacts must be a mapping",
+                str(path),
+            )
+        )
+        artifacts = {}
+    if not isinstance(stages, list) or not stages:
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_STAGES_MISSING",
+                "workflow.stages must be a non-empty list",
+                str(path),
+            )
+        )
+        stages = []
+    if not isinstance(baseline, dict):
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_BASELINE_INVALID",
+                "workflow.baseline must be a mapping",
+                str(path),
+            )
+        )
+        baseline = {}
+
+    baseline_dir = baseline.get("dir", ".bmad/baseline/spec")
+    baseline_keys = baseline.get("keys", [])
+    if not isinstance(baseline_dir, str) or not baseline_dir.strip():
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_BASELINE_DIR_INVALID",
+                "workflow.baseline.dir must be a non-empty string",
+                str(path),
+            )
+        )
+    if baseline_keys and not isinstance(baseline_keys, list):
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_BASELINE_KEYS_INVALID",
+                "workflow.baseline.keys must be a list",
+                str(path),
+            )
+        )
+        baseline_keys = []
+    if isinstance(baseline_keys, list):
+        for key in baseline_keys:
+            if key not in artifacts:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "WF_BASELINE_KEY_UNMAPPED",
+                        f"baseline key '{key}' is not mapped in workflow.artifacts",
+                        str(path),
+                    )
+                )
+
+    stage_ids: List[str] = []
+    for idx, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WF_STAGE_INVALID",
+                    f"stage[{idx}] must be an object",
+                    str(path),
+                )
+            )
+            continue
+
+        sid = stage.get("id")
+        if not isinstance(sid, str) or not sid.strip():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WF_STAGE_ID_MISSING",
+                    f"stage[{idx}] has no valid id",
+                    str(path),
+                )
+            )
+            continue
+        stage_ids.append(sid)
+
+        owner = stage.get("owner")
+        owners = stage.get("owners")
+        if not owner and not owners:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WF_STAGE_OWNER_MISSING",
+                    f"stage '{sid}' must define owner or owners",
+                    str(path),
+                )
+            )
+
+        outputs = stage.get("outputs_required")
+        if not isinstance(outputs, list) or not outputs:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WF_STAGE_OUTPUTS_MISSING",
+                    f"stage '{sid}' must define non-empty outputs_required",
+                    str(path),
+                )
+            )
+        else:
+            for key in outputs:
+                if key not in artifacts:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "WF_OUTPUT_KEY_UNMAPPED",
+                            f"stage '{sid}' outputs_required key '{key}' is not mapped in workflow.artifacts",
+                            str(path),
+                        )
+                    )
+
+        exit_gate = stage.get("exit_gate")
+        criteria = exit_gate.get("criteria") if isinstance(exit_gate, dict) else None
+        if not isinstance(criteria, list) or not criteria:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WF_STAGE_EXIT_GATE_MISSING",
+                    f"stage '{sid}' must define exit_gate.criteria with at least one item",
+                    str(path),
+                )
+            )
+
+    if len(stage_ids) != len(set(stage_ids)):
+        findings.append(
+            Finding(
+                "ERROR",
+                "WF_STAGE_DUPLICATE",
+                "workflow has duplicate stage ids",
+                str(path),
+            )
+        )
+
+    metadata = {
+        "path": path,
+        "artifacts_dir": wf.get("artifacts_dir", ".bmad/artifacts"),
+        "artifacts": artifacts,
+        "baseline": baseline,
+        "stages": stages,
+        "stage_ids": stage_ids,
+        "workflow": wf.get("workflow", {}),
+    }
+    return findings, metadata
+
+
+def resolve_artifact_path(repo_root: Path, artifacts_dir: str, filename: str) -> Path:
+    return repo_root / artifacts_dir / filename
+
+
+def required_tokens_for_artifact(artifact_key: str, filename: str) -> List[str]:
+    tokens: List[str] = []
+    if artifact_key.endswith("_gate_report") or filename.endswith("-gate-report.md"):
+        tokens.extend(["Gate Status", "Blockers"])
+    if artifact_key == "qa_test_plan":
+        tokens.extend(["Summary", "Smoke Set", "Regression", "Coverage by Task"])
+    if artifact_key == "qa_test_report":
+        tokens.extend(["Verification Method", "Overall Status"])
+    if artifact_key == "architecture_review_gate_report":
+        tokens.extend(["Review Scope", "Gate Status"])
+    return tokens
+
+
+def check_artifact_minimum_content(
+    artifact_path: Path,
+    artifact_key: str,
+    filename: str,
+) -> List[Finding]:
+    findings: List[Finding] = []
+    required = required_tokens_for_artifact(artifact_key, filename)
+    if not required:
+        return findings
+
+    try:
+        content = artifact_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        findings.append(
+            Finding(
+                "ERROR",
+                "ARTIFACT_READ_FAILED",
+                f"failed to read artifact content: {exc}",
+                str(artifact_path),
+            )
+        )
+        return findings
+
+    missing = [token for token in required if token not in content]
+    if missing:
+        findings.append(
+            Finding(
+                "ERROR",
+                "ARTIFACT_CONTENT_INCOMPLETE",
+                f"artifact '{filename}' missing required markers: {', '.join(missing)}",
+                str(artifact_path),
+            )
+        )
+    return findings
+
+
+def check_state_against_workflow(
+    repo_root: Path,
+    state_path: Path,
+    template_path: Path,
+    workflow_meta: Dict[str, Any],
+) -> List[Finding]:
+    findings: List[Finding] = []
+
+    if not state_path.exists():
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_MISSING",
+                "workflow-state.json does not exist",
+                str(state_path),
+            )
+        )
+        return findings
+
+    state = load_json(state_path)
+    template = load_json(template_path) if template_path.exists() else {}
+
+    expected_fields = set(template.keys())
+    state_fields = set(state.keys())
+    missing_fields = sorted(expected_fields - state_fields)
+    unknown_fields = sorted(state_fields - expected_fields)
+
+    for field in missing_fields:
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_FIELD_MISSING",
+                f"workflow-state missing required field '{field}'",
+                str(state_path),
+            )
+        )
+    for field in unknown_fields:
+        findings.append(
+            Finding(
+                "WARN",
+                "STATE_FIELD_UNKNOWN",
+                f"workflow-state has unknown field '{field}'",
+                str(state_path),
+            )
+        )
+
+    stage_ids: List[str] = workflow_meta["stage_ids"]
+    stages: List[Dict[str, Any]] = workflow_meta["stages"]
+    artifacts: Dict[str, str] = workflow_meta["artifacts"]
+    artifacts_dir: str = workflow_meta["artifacts_dir"]
+    baseline: Dict[str, Any] = workflow_meta.get("baseline", {})
+    stage_index = {sid: i for i, sid in enumerate(stage_ids)}
+
+    current_stage = state.get("current_stage")
+    completed = state.get("completed_stages")
+    if not isinstance(completed, list):
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_COMPLETED_INVALID",
+                "completed_stages must be a list",
+                str(state_path),
+            )
+        )
+        completed = []
+
+    if not isinstance(current_stage, str) or current_stage not in stage_index:
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_CURRENT_STAGE_INVALID",
+                "current_stage is missing or not in workflow stages",
+                str(state_path),
+            )
+        )
+    else:
+        expected_prefix = stage_ids[: stage_index[current_stage]]
+        if completed != expected_prefix:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "STATE_STAGE_SEQUENCE_INVALID",
+                    "completed_stages must exactly match stages before current_stage",
+                    str(state_path),
+                )
+            )
+
+    if len(completed) != len(set(completed)):
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_COMPLETED_DUPLICATE",
+                "completed_stages contains duplicates",
+                str(state_path),
+            )
+        )
+    for sid in completed:
+        if sid not in stage_index:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "STATE_COMPLETED_UNKNOWN",
+                    f"completed stage '{sid}' is unknown",
+                    str(state_path),
+                )
+            )
+
+    artifacts_created = state.get("artifacts_created", [])
+    if not isinstance(artifacts_created, list):
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_ARTIFACTS_CREATED_INVALID",
+                "artifacts_created must be a list",
+                str(state_path),
+            )
+        )
+        artifacts_created = []
+
+    for sid in completed:
+        stage = stages[stage_index[sid]]
+        outputs = stage.get("outputs_required", [])
+        for key in outputs:
+            filename = artifacts.get(key)
+            if not filename:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "STATE_OUTPUT_UNMAPPED",
+                        f"stage '{sid}' output key '{key}' has no artifact mapping",
+                    )
+                )
+                continue
+            artifact_path = resolve_artifact_path(repo_root, artifacts_dir, filename)
+            if not artifact_path.exists():
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "STATE_OUTPUT_MISSING_FILE",
+                        f"stage '{sid}' expected artifact missing: {artifact_path}",
+                        str(artifact_path),
+                    )
+                )
+                continue
+            if artifact_path.stat().st_size == 0:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "STATE_OUTPUT_EMPTY_FILE",
+                        f"stage '{sid}' expected artifact is empty: {artifact_path}",
+                        str(artifact_path),
+                    )
+                )
+            else:
+                findings.extend(
+                    check_artifact_minimum_content(artifact_path, key, filename)
+                )
+            if filename not in artifacts_created:
+                findings.append(
+                    Finding(
+                        "WARN",
+                        "STATE_OUTPUT_NOT_TRACKED",
+                        f"artifact '{filename}' exists for completed stage '{sid}' but is missing from state.artifacts_created",
+                        str(state_path),
+                    )
+                )
+
+    last_updated = iso_to_datetime(str(state.get("last_updated_at", "")))
+    if last_updated is None:
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_LAST_UPDATED_INVALID",
+                "last_updated_at is missing or not valid ISO8601",
+                str(state_path),
+            )
+        )
+    elif isinstance(current_stage, str) and current_stage in stage_index:
+        stage = stages[stage_index[current_stage]]
+        outputs = stage.get("outputs_required", [])
+        stale_outputs: List[str] = []
+        for key in outputs:
+            filename = artifacts.get(key)
+            if not filename:
+                continue
+            artifact_path = resolve_artifact_path(repo_root, artifacts_dir, filename)
+            if artifact_path.exists():
+                mtime = dt.datetime.fromtimestamp(
+                    artifact_path.stat().st_mtime, tz=last_updated.tzinfo
+                )
+                if mtime < last_updated:
+                    stale_outputs.append(filename)
+        if stale_outputs:
+            findings.append(
+                Finding(
+                    "WARN",
+                    "STATE_CURRENT_STAGE_STALE_OUTPUTS",
+                    (
+                        "current_stage already has older output artifacts before last_updated_at; "
+                        "possible stale evidence reuse: "
+                        + ", ".join(sorted(stale_outputs))
+                    ),
+                    str(state_path),
+                )
+            )
+
+    verification_policy = state.get("verification_policy")
+    if verification_policy not in {"default", "ask", "strict"}:
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_VERIFICATION_POLICY_INVALID",
+                "verification_policy must be one of: default|ask|strict",
+                str(state_path),
+            )
+        )
+    verification_decision = state.get("verification_decision")
+    if verification_decision not in {"unknown", "execute", "skip"}:
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_VERIFICATION_DECISION_INVALID",
+                "verification_decision must be one of: unknown|execute|skip",
+                str(state_path),
+            )
+        )
+
+    task_ids = state.get("task_ids", [])
+    if not isinstance(task_ids, list):
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_TASK_IDS_INVALID",
+                "task_ids must be a list",
+                str(state_path),
+            )
+        )
+    elif "parallel_dev" in completed and not task_ids:
+        findings.append(
+            Finding(
+                "ERROR",
+                "STATE_TASK_IDS_EMPTY",
+                "parallel_dev is completed but task_ids is empty",
+                str(state_path),
+            )
+        )
+
+    if "release_candidate" in completed and isinstance(baseline, dict):
+        baseline_dir = baseline.get("dir", ".bmad/baseline/spec")
+        baseline_keys = baseline.get("keys", [])
+        if (
+            isinstance(baseline_dir, str)
+            and baseline_dir.strip()
+            and isinstance(baseline_keys, list)
+        ):
+            for key in baseline_keys:
+                filename = artifacts.get(key)
+                if not filename:
+                    continue
+                baseline_file = repo_root / baseline_dir / filename
+                if not baseline_file.exists() or baseline_file.stat().st_size == 0:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "BASELINE_FILE_MISSING",
+                            f"release_candidate is completed but baseline file missing/empty for key '{key}': {baseline_file}",
+                            str(baseline_file),
+                        )
+                    )
+
+    return findings
+
+
+def print_findings(findings: Iterable[Finding]) -> int:
+    errors = 0
+    warnings = 0
+    infos = 0
+    for item in findings:
+        if item.severity == "ERROR":
+            errors += 1
+        elif item.severity == "WARN":
+            warnings += 1
+        else:
+            infos += 1
+        suffix = f" [{item.ref}]" if item.ref else ""
+        print(f"{item.severity} {item.code}: {item.message}{suffix}")
+
+    print(f"\nSummary: {errors} error(s), {warnings} warning(s), {infos} info")
+    return 1 if errors else 0
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Audit BMAD workflow and state consistency."
+    )
+    parser.add_argument(
+        "--workflow",
+        action="append",
+        help="Workflow YAML path to audit. Can be passed multiple times.",
+    )
+    parser.add_argument(
+        "--state",
+        default=".bmad/artifacts/workflow-state.json",
+        help="workflow-state.json path",
+    )
+    parser.add_argument(
+        "--template",
+        default=".bmad/templates/workflow-state.template.json",
+        help="workflow-state template path",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    repo_root = Path.cwd()
+
+    workflow_paths = args.workflow or [
+        ".bmad/workflows/workflow.yml",
+        ".bmad/workflows/bugfix.yml",
+    ]
+    workflow_paths_resolved = [repo_root / p for p in workflow_paths]
+
+    findings: List[Finding] = []
+    workflow_meta_by_path: Dict[str, Dict[str, Any]] = {}
+
+    for wf_path in workflow_paths_resolved:
+        if not wf_path.exists():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WF_FILE_MISSING",
+                    "workflow file does not exist",
+                    str(wf_path),
+                )
+            )
+            continue
+        try:
+            wf_findings, meta = check_workflow_definition(wf_path)
+            findings.extend(wf_findings)
+            workflow_meta_by_path[str(wf_path)] = meta
+        except Exception as exc:  # pragma: no cover - defensive error surfacing
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "WF_LOAD_FAILED",
+                    f"failed to parse workflow: {exc}",
+                    str(wf_path),
+                )
+            )
+
+    state_path = repo_root / args.state
+    template_path = repo_root / args.template
+    if state_path.exists():
+        try:
+            state = load_json(state_path)
+            state_workflow_path = state.get("workflow_path")
+            if isinstance(state_workflow_path, str) and state_workflow_path.strip():
+                resolved = (repo_root / state_workflow_path).resolve()
+                meta = workflow_meta_by_path.get(str(resolved))
+                if meta is None and resolved.exists():
+                    wf_findings, meta = check_workflow_definition(resolved)
+                    findings.extend(wf_findings)
+                    workflow_meta_by_path[str(resolved)] = meta
+                if meta:
+                    findings.extend(
+                        check_state_against_workflow(
+                            repo_root=repo_root,
+                            state_path=state_path,
+                            template_path=template_path,
+                            workflow_meta=meta,
+                        )
+                    )
+                else:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "STATE_WORKFLOW_UNRESOLVED",
+                            "state.workflow_path cannot be resolved for state validation",
+                            str(state_path),
+                        )
+                    )
+            else:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "STATE_WORKFLOW_PATH_MISSING",
+                        "state.workflow_path is missing",
+                        str(state_path),
+                    )
+                )
+        except Exception as exc:  # pragma: no cover - defensive error surfacing
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "STATE_LOAD_FAILED",
+                    f"failed to parse state: {exc}",
+                    str(state_path),
+                )
+            )
+    else:
+        findings.append(
+            Finding(
+                "WARN",
+                "STATE_NOT_FOUND",
+                "workflow-state file not found; runtime checks skipped",
+                str(state_path),
+            )
+        )
+
+    return print_findings(findings)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

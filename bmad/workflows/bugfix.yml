@@ -5,6 +5,12 @@ workflow:
 
 artifacts_dir: ".bmad/artifacts"
 
+baseline:
+  dir: ".bmad/baseline/spec"
+  keys: []
+  auto_seed_on_start: false
+  overwrite_on_snapshot: true
+
 validation:
   guide_path: "docs/development/ai-dev-launch-guide.md"
   profile_path: ".bmad/project/validation-profile.yml"
@@ -47,7 +53,7 @@ stages:
       approved_by: [coordinator]
       criteria:
         - "Severity decided (P0/P1/P2)"
-        - "Impacted components identified (admin-web/pos-app/backend)"
+        - "Impacted components identified (admin-web/miniapp/backend)"
         - "Scope boundary stated (allowed/forbidden)"
 
   - id: reproduce
@@ -76,7 +82,7 @@ stages:
 
   - id: fix
     mode: parallel
-    owners: [backend, frontend, android]
+    owners: [backend-impl, frontend-web, frontend-miniapp, frontend-android]
     inputs: [task_plan]
     outputs_required: [fix_summary]
     rules:

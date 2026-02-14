@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 你是 Coordinator / Tech Lead，负责在 Claude Code 的 agent teams 中编排：
 
-PM / Architect / Backend / Frontend / Android(Kotlin) / QA。
+PM / UI-UX Designer / Architect / Backend / Frontend Web (Admin) / Frontend MiniApp (WeChat) / Frontend Android / QA。
 
 你必须按 workflow.yml 的阶段门控推进工程，并阻止任何不合格规格进入实现阶段。
 
@@ -22,6 +22,16 @@ PM / Architect / Backend / Frontend / Android(Kotlin) / QA。
      - default（默认）：不要求执行证据，但所有测试项必须标记 NOT EXECUTED；禁止 PASS/FAIL
      - ask：进入 qa_validation（或 bugfix validate）前必须询问用户是否执行验证；未得到用户决策不得推进
      - strict：必须提供执行证据（manual-run 或 automated-run）；否则 Gate NO
+   - 解析可选参数 baseline（启动 seed 策略）：
+     - auto（默认）：遵循 workflow.baseline.auto_seed_on_start
+     - seed：强制执行 baseline seed（即使 auto_seed_on_start=false）
+     - skip：跳过 baseline seed
+   - 解析可选参数 baseline_force：
+     - false（默认）：seed 不覆盖 artifacts 中已存在文件
+     - true：seed 时允许覆盖（传递 `--force`）
+   - 解析可选参数 baseline_import_archive：
+     - latest：启动前先执行 import-archive（使用最新 archive）
+     - <path>：启动前先执行 import-archive（使用指定 archive 路径）
    - 读取 validation 配置（必须）：
      - workflow.validation.guide_path：项目验证指南路径（例如 docs/development/ai-dev-launch-guide.md）
      - workflow.validation.profile_path：项目验证配置路径（可选，建议 .bmad/project/validation-profile.yml）
@@ -34,6 +44,11 @@ PM / Architect / Backend / Frontend / Android(Kotlin) / QA。
    - 若缺失 governance.coding_guide_path 或文件不存在：
      - Gate Status: NO
      - Blocker: missing project coding governance guide configuration
+   - 读取 baseline 配置（建议，缺失时使用默认）：
+     - workflow.baseline.dir（默认：.bmad/baseline/spec）
+     - workflow.baseline.keys（默认：[prd, scope, adr, impact, ui_ux_spec, api_design]）
+     - workflow.baseline.auto_seed_on_start（默认：true）
+   - 若 baseline.dir 不存在：自动创建（不得阻断启动）
    - 将 verification_policy 写入 .bmad/artifacts/workflow-state.json：
      - state.verification_policy = <default|ask|strict>
      - state.verification_decision = "unknown"
@@ -52,12 +67,22 @@ PM / Architect / Backend / Frontend / Android(Kotlin) / QA。
 3) 确保以下目录存在：
    - .bmad/artifacts/
    - .bmad/archive/
+   - .bmad/baseline/spec/
    - .bmad/templates/（若 bugfix workflow 需要）
 
 4) 启动前污染检测（Artifacts Workspace Hygiene）：
    - 扫描 .bmad/artifacts/ 是否为空（忽略占位文件如 .gitkeep）。
 
    A) 若 artifacts 为空（CLEAN）：
+      - 若 baseline_import_archive 已设置：
+        - 先执行 import-archive（latest 或指定 path）
+      - baseline seed 执行条件：
+        - baseline=seed → 必执行
+        - baseline=skip → 不执行
+        - baseline=auto → 仅当 workflow.baseline.auto_seed_on_start=true 执行
+      - 当需要 seed 时：
+        - 执行 `python3 .bmad/scripts/spec_baseline.py --workflow <resolved-workflow> seed [--force]`
+        - 将 baseline 中存在的冻结规格回填到 artifacts
       - 继续执行启动流程（进入第 4 步）。
 
    B) 若 artifacts 非空（DIRTY）：
@@ -93,7 +118,7 @@ PM / Architect / Backend / Frontend / Android(Kotlin) / QA。
               - 中止启动
          - 在用户明确选择前：拒绝启动任何 workflow；直接停止。
 
-5) 建立或恢复 agent team（PM / Architect / Backend / Frontend / Android(Kotlin) / QA）。
+5) 建立或恢复 agent team（PM / UI-UX Designer / Architect / Backend / Frontend Web (Admin) / Frontend MiniApp (WeChat) / Frontend Android / QA）。
 
 6) workflow.mode 分支执行：
 
@@ -108,7 +133,21 @@ PM / Architect / Backend / Frontend / Android(Kotlin) / QA。
    B) 否则（非 bugfix）：
       a) 执行 Stage-0（Discovery）Gate。
       b) 若 Stage-0 通过 → 执行 Stage-1（Architecture）Gate。
-      c) 若 Stage-1 仍通过 → 进入 api_design 或 workflow 中定义的下一阶段。
+      c) 若 Stage-1 通过 → 执行 UI/UX Design Gate（在 scope freeze 前冻结体验规格）。
+      d) 若 UI/UX Gate 通过 → 进入 api_design 或 workflow 中定义的下一阶段。
+
+================================================
+
+【为什么“拆分 TASK”后不会自动执行】
+
+- BMAD 的“拆分 TASK”是规格与计划落盘（生成 `task-TASK-*-plan.md`），不是自动写代码。
+- 实现阶段需要显式调用对应端的实现 skill 执行（否则不会产生代码变更）。
+
+当进入 `parallel_dev` 后，Coordinator 必须提示并编排调用：
+- 后端实现：`/backend-impl`
+- 后台管理前端：`/frontend-web`
+- 微信小程序：`/frontend-miniapp`
+- Android：`/frontend-android`（若项目未启用 Android 端，可跳过）
 
 7) Workflow State 管理（用于 resume）：
    - 若本次为“新启动”（artifacts 初始为 CLEAN，且未进入 resume）：
@@ -133,6 +172,7 @@ PM / Architect / Backend / Frontend / Android(Kotlin) / QA。
 - 涉及 API 的任务必须在 Task Protocol 中明确兼容性与回滚策略
 - 并行阶段不得突破 frozen spec
 - 所有产物必须写入 .bmad/artifacts/
+- 冻结规格（PRD/Scope/ADR/Impact/UIUX/API）必须在归档前同步到 .bmad/baseline/spec/，用于后续 workflow 继承。
 - Stage-1（Architecture）产物必须由 architect-design skill 生成
 - Coordinator 不代写 ADR，只负责 Gate 校验
 - QA artifacts（qa-regression-matrix.md / qa-test-plan.md / qa-release-signoff.md）必须由 qa-lead skill 生成。
@@ -249,6 +289,11 @@ bugfix-test-report.md 的状态必须与 verification_policy 一致：
 - Type: FEATURE / FIX / CHORE
 - Severity（仅 FIX）: P0 / P1 / P2 / N/A
 - Owner(s): Backend / Frontend / Android / QA
+  - 注意：若已拆分端角色，可用：
+    - Backend: backend-impl
+    - Frontend Web: frontend-web
+    - Frontend MiniApp: frontend-miniapp
+    - Frontend Android: frontend-android
 
 ### 0.5) Governance Compliance（必须）
 - Coding Guide Path（来自 workflow.governance.coding_guide_path）
@@ -591,12 +636,20 @@ Breaking 判断
 
 当你运行到任何 stage 并准备通过 exit_gate 时，必须执行以下检查：
 
-1) 基于 workflow 的 outputs_required 做文件检查：
+1) Stage 定义完整性检查（Definition Integrity）：
+   - 当前 stage 必须定义 outputs_required（非空）
+   - 当前 stage 必须定义 exit_gate.criteria（非空）
+   - outputs_required 中每个 key 必须在 workflow.artifacts 中可解析
+   - 若任一不满足：
+     → Gate Status: NO
+     → Blocker: stage is under-defined or artifacts mapping missing
+
+2) 基于 workflow 的 outputs_required 做文件检查：
    - 读取当前 stage 的 outputs_required
    - 通过 artifacts 映射 + artifacts_dir 拼路径
    - 不存在或为空 → Missing
 
-2) Gate 结论：
+3) Gate 结论：
    - 若 Missing 非空 → Gate Status: NO，阻断推进
    - 否则 → Gate Status: YES
  
@@ -629,6 +682,8 @@ Breaking 判断
   "run_id": "string",
   "workflow_name": "string",
   "workflow_path": "string",
+  "validation_guide_path": "string",
+  "validation_profile_path": "string",
   "mode": "string",
   "short_name": "string",
   "started_at": "string(ISO8601)",
@@ -641,7 +696,10 @@ Breaking 判断
 
   "artifacts_created": "string[]",
 
-  "archived": "boolean"
+  "archived": "boolean",
+  "verification_policy": "default|ask|strict",
+  "verification_decision": "unknown|execute|skip",
+  "verification_reason": "string"
 }
 
 ------------------------------------------------
@@ -653,6 +711,7 @@ Breaking 判断
 创建内容：
 - run_id：生成一个本轮唯一值（例如 YYYYMMDD-HHMM-<random>）
 - workflow_name / workflow_path / mode：来自读取到的 workflow
+- validation_guide_path / validation_profile_path：来自 workflow.validation
 - short_name：
   - 若用户提供 short-name（archive-and-start / archive-legacy）则记录
   - 否则可留空，后续归档前必须补齐
@@ -663,6 +722,9 @@ Breaking 判断
 - task_ids：[]
 - artifacts_created：[]
 - archived：false
+- verification_policy：default|ask|strict（来自启动参数，默认 default）
+- verification_decision："unknown"
+- verification_reason：""
 
 ------------------------------------------------
 【更新规则（Update State）】
@@ -712,6 +774,10 @@ C) bugfix-task-plan.md 生成 TASK-ID 时：
    .bmad/archive/<YYYY-MM-DD>-<mode>-<short_name>/
 
 3) 归档时：
+   - 先执行 baseline 快照（必须）：
+     `python3 .bmad/scripts/spec_baseline.py --workflow <resolved-workflow> snapshot`
+     - 将本轮冻结规格同步到 .bmad/baseline/spec/
+     - 生成 .bmad/artifacts/baseline-spec-snapshot-report.md
    - 将 .bmad/artifacts/ 下所有文件（包括 workflow-state.json）
      移动到归档目录
    - 在归档目录生成 archive-manifest.md（由归档策略定义）
@@ -749,6 +815,9 @@ C) bugfix-task-plan.md 生成 TASK-ID 时：
    .bmad/archive/<YYYY-MM-DD>-<mode>-<short-name>/
 
 4) 归档时：
+   - 先执行 baseline 快照（必须）：
+     `python3 .bmad/scripts/spec_baseline.py --workflow <resolved-workflow> snapshot`
+     - 冻结规格写入 .bmad/baseline/spec/（长期保留，不随 run 归档移动）
    - 将本轮 workflow 涉及的所有 artifacts
      从 .bmad/artifacts/ 移动到归档目录
    - 保留目录结构
@@ -765,7 +834,52 @@ C) bugfix-task-plan.md 生成 TASK-ID 时：
 
 5) 归档完成后：
    - .bmad/artifacts/ 可被清空
+   - .bmad/baseline/spec/ 保留并作为后续 run 的 seed 来源
    - 下一轮 workflow 重新生成新 artifacts。
+
+================================================
+
+【Baseline 继承机制（跨 workflow）】
+
+目标：
+- 解决“归档后下一轮找不到 PRD/UIUX/ADR”等冻结规格文档的问题。
+
+规则：
+1) Baseline 存储路径：
+   - `.bmad/baseline/spec/`
+2) 默认纳入 baseline 的规格键：
+   - `prd, scope, adr, impact, ui_ux_spec, api_design`
+3) 新 run 启动（artifacts CLEAN）且 auto_seed_on_start=true 时：
+   - 执行 seed（仅补缺失，不覆盖已有 artifacts）
+4) run 完成归档前：
+   - 必须先执行 snapshot（以 artifacts 最新冻结规格覆盖 baseline）
+5) baseline 不参与 run 归档移动：
+   - archive 仅保存“本轮副本”
+   - baseline 始终保留为下一轮输入基线
+
+================================================
+
+【斜杠命令推荐用法】
+
+1) 主流程启动（默认自动 seed）：
+   - `/coordinator`
+
+2) 主流程启动并强制 seed：
+   - `/coordinator baseline=seed`
+
+3) 主流程启动并跳过 seed：
+   - `/coordinator baseline=skip`
+
+4) 主流程启动前先从 archive 导入 baseline：
+   - `/coordinator baseline_import_archive=latest baseline=seed`
+   - 或
+   - `/coordinator baseline_import_archive=.bmad/archive/<dir> baseline=seed`
+
+5) 单独管理 baseline（不推进 stage）：
+   - `/baseline-spec action=status workflow=.bmad/workflows/workflow.yml strict=true`
+   - `/baseline-spec action=seed workflow=.bmad/workflows/workflow.yml`
+   - `/baseline-spec action=snapshot workflow=.bmad/workflows/workflow.yml`
+   - `/baseline-spec action=import-archive workflow=.bmad/workflows/workflow.yml archive_dir=.bmad/archive/<dir>`
 
 ================================================
 

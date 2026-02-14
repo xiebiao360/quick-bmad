@@ -76,3 +76,29 @@ Bugfix 流程：
 
 3. `Skill ... cannot be used with Skill tool due to disable-model-invocation`
 - 检查目标 skill frontmatter 中的 `disable-model-invocation`。
+
+## Baseline 继承（新增）
+
+为避免归档后丢失 PRD/UIUX/ADR 等冻结规格，新增 baseline 机制：
+
+- 基线路径：`.bmad/baseline/spec/`
+- 主流程可在启动时自动 seed（回填缺失规格到 `.bmad/artifacts/`）
+- 归档前应做 snapshot（将最新冻结规格写回 baseline）
+
+推荐斜杠命令：
+
+```text
+/coordinator baseline=auto
+/coordinator baseline=seed
+/coordinator baseline=skip
+/coordinator baseline_import_archive=latest baseline=seed
+```
+
+单独操作 baseline：
+
+```text
+/baseline-spec action=status workflow=.bmad/workflows/workflow.yml strict=true
+/baseline-spec action=seed workflow=.bmad/workflows/workflow.yml
+/baseline-spec action=snapshot workflow=.bmad/workflows/workflow.yml
+/baseline-spec action=import-archive workflow=.bmad/workflows/workflow.yml archive_dir=.bmad/archive/<dir>
+```

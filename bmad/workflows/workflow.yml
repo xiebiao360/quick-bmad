@@ -4,6 +4,12 @@ workflow:
 
 artifacts_dir: ".bmad/artifacts"
 
+baseline:
+  dir: ".bmad/baseline/spec"
+  keys: [prd, scope, adr, impact, ui_ux_spec, api_design]
+  auto_seed_on_start: true
+  overwrite_on_snapshot: true
+
 validation:
   guide_path: "docs/development/ai-dev-launch-guide.md"
   profile_path: ".bmad/project/validation-profile.yml"
@@ -16,58 +22,164 @@ artifacts:
   # ===== Discovery =====
   prd: "discovery-prd.md"
   scope: "discovery-scope-definition.md"
+  discovery_gate_report: "discovery-gate-report.md"
+
+  # ===== UI/UX =====
+  ui_ux_spec: "ui-ux-design-spec.md"
 
   # ===== Architecture =====
   adr: "architecture_design-adr.md"
   impact: "architecture_design-impact-analysis.md"
+  architecture_gate_report: "architecture-gate-report.md"
+  architecture_review_gate_report: "architecture-review-gate-report.md"
 
-  # ===== Tasks / QA =====
+  # ===== API Design =====
+  api_design: "api-design.md"
+
+  # ===== Task Execution =====
+  scope_freeze_gate_report: "scope-freeze-gate-report.md"
+  parallel_dev_complete_report: "parallel-dev-complete.md"
+  parallel_dev_gate_report: "parallel-dev-gate-report.md"
+
+  # ===== QA / Release =====
   qa_matrix: "qa-regression-matrix.md"
   qa_test_plan: "qa-test-plan.md"
   qa_test_report: "qa-test-report.md"
+  qa_release_signoff: "qa-release-signoff.md"
+  baseline_snapshot_report: "baseline-spec-snapshot-report.md"
+  release_candidate_gate_report: "release-candidate-gate-report.md"
 
 templates:
   qa_test_report: ".bmad/templates/qa-test-report.template.md"
+  ui_ux_spec: ".bmad/templates/ui-ux-design-spec.template.md"
+  api_design: ".bmad/templates/api-design.template.md"
 
 stages:
   - id: discovery
     owner: product_manager
+    outputs_required: [prd, scope, discovery_gate_report]
     exit_gate:
       criteria:
-        - "PRD complete"
-        - "Scope complete"
+        - "discovery-prd.md exists and includes Goals/Non-Goals/Personas/User Journey/Functional Requirements/Out of Scope/Success Metrics/Risks/Dependencies"
+        - "discovery-scope-definition.md exists and includes In-scope/Out-of-scope/Affected components/Explicitly untouched modules/Risks"
+        - "discovery-gate-report.md exists and explicitly records Gate Status YES/NO with blockers"
 
   - id: architecture_design
     owner: architect
+    inputs: [prd, scope]
+    outputs_required: [adr, impact, architecture_gate_report]
     exit_gate:
       criteria:
-        - "ADR quality"
-        - "Aligned with PRD"
+        - "architecture_design-adr.md exists and includes Context/Decision/Alternatives/Consequences/Impacted Modules/API-Data impact/Migration-Rollback/Risks/Non-Goals"
+        - "architecture_design-impact-analysis.md exists and includes BE/FE/Android/QA impacts and breaking/regression assessment"
+        - "architecture-gate-report.md exists and records architecture gate decision"
+        - "Architecture outputs are aligned with PRD/Scope and include UX constraints (3rd-party limits, performance budgets, fallbacks)"
+
+  - id: ui_ux_design
+    owner: ui_ux_designer
+    inputs: [adr, impact]
+    outputs_required: [ui_ux_spec]
+    exit_gate:
+      criteria:
+        - "ui-ux-design-spec.md exists"
+        - "Spec references PRD + Scope and declares supported surfaces (mini-program/admin/etc.)"
+        - "Spec respects architecture constraints (IM/map/pay limitations, performance budgets, fallback paths)"
+        - "Design tokens defined (color/typography/spacing/radius/shadow/motion)"
+        - "Key screens and states defined for MVP flows"
 
   - id: api_design
-    owner: backend
+    owner: backend-api
+    inputs: [prd, scope, adr, impact, ui_ux_spec]
+    outputs_required: [api_design]
+    exit_gate:
+      criteria:
+        - "api-design.md exists"
+        - "Endpoints defined and traceable to PRD/Scope and key UX flows"
+        - "AuthN/AuthZ defined (roles/scopes) and applied consistently"
+        - "Error model defined (codes/messages) with recoverability guidance"
+        - "Pagination/sorting/filtering conventions defined where needed"
+        - "Idempotency and concurrency rules defined for create/pay/invite flows (where applicable)"
+        - "3rd-party integrations documented (IM/map/pay/AI) including failure handling"
 
   - id: scope_freeze
     owner: coordinator
+    outputs_required: [scope_freeze_gate_report]
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "discovery-prd.md and discovery-scope-definition.md are final for MVP (no unresolved scope blockers)"
+        - "architecture_design-adr.md and architecture_design-impact-analysis.md exist and are consistent with PRD/Scope"
+        - "ui-ux-design-spec.md exists and is consistent with architecture constraints"
+        - "Any remaining open questions are explicitly tracked and marked non-blocking"
+        - "scope-freeze-gate-report.md exists and records freeze approval"
 
   - id: parallel_dev
-    owners: [backend, frontend, android]
+    owners: [backend-impl, frontend-web, frontend-miniapp, frontend-android]
+    outputs_required: [parallel_dev_complete_report, parallel_dev_gate_report]
     rules:
       - "Coordinator auto-generates TASK-IDs"
       - "Each task requires task-TASK-XXX-plan.md before coding"
+    exit_gate:
+      approved_by: [coordinator]
+      criteria:
+        - "All in-scope TASK plans exist and pass Task Protocol checks before coding"
+        - "parallel-dev-complete.md exists and summarizes actual implementation outputs, unresolved issues, and next actions"
+        - "parallel-dev-gate-report.md exists with task coverage, blockers/warnings, and explicit Gate Status"
+        - "No unresolved blocker remains that would invalidate entry to architecture_review or qa_validation"
 
   - id: architecture_review
     owner: architect
+    inputs:
+      [
+        prd,
+        scope,
+        adr,
+        impact,
+        ui_ux_spec,
+        api_design,
+        parallel_dev_complete_report,
+      ]
+    outputs_required: [architecture_review_gate_report]
+    exit_gate:
+      approved_by: [architect, coordinator]
+      criteria:
+        - "architecture-review-gate-report.md exists and references the latest ADR/Impact/API/UIUX/Task artifacts from this run"
+        - "Report includes consistency checks, risk review, blockers, and explicit decision (PASS/FAIL)"
+        - "Any architecture-level gap found in implementation is either fixed or tracked with owner and due stage"
 
   - id: qa_validation
     owner: qa
-    inputs: [frozen_spec]
+    inputs:
+      [
+        prd,
+        scope,
+        adr,
+        impact,
+        ui_ux_spec,
+        api_design,
+        parallel_dev_complete_report,
+      ]
     outputs_required: [qa_matrix, qa_test_plan, qa_test_report]
     exit_gate:
       approved_by: [coordinator]
       criteria:
         - "qa-regression-matrix.md exists and includes smoke set + full regression set"
         - "qa-test-plan.md exists and maps to tasks"
+        - "qa-test-report.md exists and complies with verification_policy (default/ask/strict)"
+        - "All TASK IDs in workflow-state.json are covered in qa-test-plan.md"
 
   - id: release_candidate
     owner: coordinator
+    inputs: [qa_matrix, qa_test_plan, qa_test_report]
+    outputs_required:
+      [
+        qa_release_signoff,
+        baseline_snapshot_report,
+        release_candidate_gate_report,
+      ]
+    exit_gate:
+      approved_by: [coordinator, qa]
+      criteria:
+        - "qa-release-signoff.md exists with Go/No-Go recommendation and accepted risks"
+        - "baseline-spec-snapshot-report.md exists and confirms frozen specs are synced to baseline directory"
+        - "release-candidate-gate-report.md exists and records final blockers, decision, and archive readiness"

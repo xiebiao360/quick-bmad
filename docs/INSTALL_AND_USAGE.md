@@ -183,3 +183,63 @@ cd <quick-bmad-root>
 - coordinator 启动时不再报 guide/profile 缺失。
 - 至少完成一次 bugfix 到 validate 的完整演练。
 - 在 `ask=execute` 或 `strict` 下，能产出执行证据报告（如 `bugfix-test-report.md` + `qa-execution-evidence.md`）。
+
+## 9. Baseline 继承（slash 命令）
+
+### 9.1 为什么需要
+
+归档后 `.bmad/artifacts/` 会清空。为避免新一轮 workflow 找不到 PRD/UIUX/ADR，建议启用 baseline：
+
+- 长期基线：`.bmad/baseline/spec/`
+- 启动时回填：seed
+- 归档前固化：snapshot
+
+### 9.2 安装补充（脚本与基线路径）
+
+若手工安装，请确认已复制：
+
+- `bmad/scripts/spec_baseline.py` -> `.bmad/scripts/spec_baseline.py`
+- `bmad/scripts/audit_workflow.py` -> `.bmad/scripts/audit_workflow.py`
+- `bmad/baseline/spec/README.md` -> `.bmad/baseline/spec/README.md`
+- `claude/skills/baseline-spec/SKILL.md` -> `.claude/skills/baseline-spec/SKILL.md`
+
+### 9.3 推荐使用方式（只用斜杠命令）
+
+主流程：
+
+```text
+/coordinator verification_policy=default baseline=auto
+```
+
+强制回填基线：
+
+```text
+/coordinator baseline=seed
+```
+
+跳过回填：
+
+```text
+/coordinator baseline=skip
+```
+
+先从归档导入再启动：
+
+```text
+/coordinator baseline_import_archive=latest baseline=seed
+```
+
+指定归档目录导入：
+
+```text
+/coordinator baseline_import_archive=.bmad/archive/<dir> baseline=seed
+```
+
+仅管理 baseline（不推进 stage）：
+
+```text
+/baseline-spec action=status workflow=.bmad/workflows/workflow.yml strict=true
+/baseline-spec action=import-archive workflow=.bmad/workflows/workflow.yml archive_dir=.bmad/archive/<dir>
+/baseline-spec action=seed workflow=.bmad/workflows/workflow.yml force=true
+/baseline-spec action=snapshot workflow=.bmad/workflows/workflow.yml
+```
